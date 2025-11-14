@@ -1,12 +1,12 @@
 use std::convert::TryInto;
 use std::fs;
-use std::io::{Cursor, Read, Write};
+use std::io::{self, Cursor, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 use planten_9p::RawMessage;
-use planten_9p::messages::RERROR;
+use planten_9p::messages::{RERROR, RSTAT};
 use planten_fs_ramfs::{RamFs, server};
 
 fn parse_frames(bytes: &[u8]) -> Vec<(Vec<u8>, RawMessage)> {
@@ -20,6 +20,31 @@ fn parse_frames(bytes: &[u8]) -> Vec<(Vec<u8>, RawMessage)> {
         pos += size;
     }
     frames
+}
+
+fn read_u16(cursor: &mut Cursor<&[u8]>) -> u16 {
+    let mut buf = [0u8; 2];
+    cursor.read_exact(&mut buf).unwrap();
+    u16::from_le_bytes(buf)
+}
+
+fn read_u32(cursor: &mut Cursor<&[u8]>) -> u32 {
+    let mut buf = [0u8; 4];
+    cursor.read_exact(&mut buf).unwrap();
+    u32::from_le_bytes(buf)
+}
+
+fn read_u64(cursor: &mut Cursor<&[u8]>) -> u64 {
+    let mut buf = [0u8; 8];
+    cursor.read_exact(&mut buf).unwrap();
+    u64::from_le_bytes(buf)
+}
+
+fn read_string(cursor: &mut Cursor<&[u8]>) -> io::Result<String> {
+    let len = read_u16(cursor)? as usize;
+    let mut buf = vec![0u8; len];
+    cursor.read_exact(&mut buf)?;
+    String::from_utf8(buf).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid string"))
 }
 
 #[test]
@@ -75,6 +100,23 @@ fn golden_trace_matches_server_interaction() {
     let actual_read = RawMessage::read_from(&mut stream).unwrap();
     assert_eq!(actual_read.msg_type, read_exchange[1].1.msg_type);
     assert_eq!(actual_read.body, read_exchange[1].1.body);
+
+    let tstat_request =
+        parse_frames(&fs::read("../planten_9p/tests/golden_traces/tstat_request.bin").unwrap());
+    stream.write_all(&tstat_request[0].0).unwrap();
+    let actual_stat = RawMessage::read_from(&mut stream).unwrap();
+    assert_eq!(actual_stat.msg_type, RSTAT);
+    let mut stat_cursor = Cursor::new(actual_stat.body.as_slice());
+    let _stat_size = read_u16(&mut stat_cursor);
+    let _stat_type = read_u16(&mut stat_cursor);
+    let _stat_dev = read_u32(&mut stat_cursor);
+    let _ = stat_cursor.read_exact(&mut [0u8; 13]);
+    let _mode = read_u32(&mut stat_cursor);
+    let _atime = read_u32(&mut stat_cursor);
+    let _mtime = read_u32(&mut stat_cursor);
+    let _length = read_u64(&mut stat_cursor);
+    let name = read_string(&mut stat_cursor).unwrap();
+    assert_eq!(name, "hello.txt");
 
     let write_exchange =
         parse_frames(&fs::read("../planten_9p/tests/golden_traces/write_exchange.bin").unwrap());
