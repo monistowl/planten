@@ -189,8 +189,9 @@ fn golden_trace_matches_server_interaction() {
     assert_eq!(actual_clone.msg_type, RCLONE);
     assert_eq!(actual_clone.tag, 0x9999);
 
-    let flush_error_request =
-        parse_frames(&fs::read("../planten_9p/tests/golden_traces/tflush_error_request.bin").unwrap());
+    let flush_error_request = parse_frames(
+        &fs::read("../planten_9p/tests/golden_traces/tflush_error_request.bin").unwrap(),
+    );
     stream.write_all(&flush_error_request[0].0).unwrap();
     let actual_flush_error = RawMessage::read_from(&mut stream).unwrap();
     let expected_flush_error = RawMessage::from_bytes(
@@ -204,9 +205,10 @@ fn golden_trace_matches_server_interaction() {
         parse_frames(&fs::read("../planten_9p/tests/golden_traces/tread_oob_request.bin").unwrap());
     stream.write_all(&oob_request[0].0).unwrap();
     let actual_oob = RawMessage::read_from(&mut stream).unwrap();
-    let expected_oob =
-        RawMessage::from_bytes(&fs::read("../planten_9p/tests/golden_traces/rerror_oob.bin").unwrap())
-            .unwrap();
+    let expected_oob = RawMessage::from_bytes(
+        &fs::read("../planten_9p/tests/golden_traces/rerror_oob.bin").unwrap(),
+    )
+    .unwrap();
     assert_eq!(actual_oob.msg_type, expected_oob.msg_type);
     assert_eq!(actual_oob.body, expected_oob.body);
 

@@ -3,7 +3,7 @@ use std::io::{Cursor, Read};
 
 use planten_9p::RawMessage;
 use planten_9p::messages::{
-    RATTACH, RCLONE, RERROR, ROPEN, RREAD, RVERSION, RWALK, RWRITE, TATTACH, TVERSION,
+    RATTACH, RCLONE, RERROR, ROPEN, RREAD, RVERSION, RWALK, RWRITE, TATTACH, TREAD, TVERSION, TWALK,
 };
 
 fn read_u16(cursor: &mut Cursor<&[u8]>) -> u16 {
@@ -140,4 +140,30 @@ fn golden_clone_trace_parses() {
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, RCLONE);
     assert_eq!(frame.tag, 0x9999);
+}
+
+#[test]
+fn golden_twalk_error_parses() {
+    let bytes = fs::read("tests/golden_traces/twalk_error_request.bin").unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, TWALK);
+    assert_eq!(frame.tag, 0xaadd);
+
+    let bytes = fs::read("tests/golden_traces/rerror_walk.bin").unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, RERROR);
+    assert_eq!(frame.tag, 0xaadd);
+}
+
+#[test]
+fn golden_tread_oob_error_parses() {
+    let bytes = fs::read("tests/golden_traces/tread_oob_request.bin").unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, TREAD);
+    assert_eq!(frame.tag, 0x0202);
+
+    let bytes = fs::read("tests/golden_traces/rerror_oob.bin").unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, RERROR);
+    assert_eq!(frame.tag, 0x0202);
 }
