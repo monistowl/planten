@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{Cursor, Read};
 
 use planten_9p::RawMessage;
-use planten_9p::messages::{ROPEN, RREAD, RVERSION, RWALK};
+use planten_9p::messages::{RERROR, ROPEN, RREAD, RVERSION, RWALK, RWRITE};
 
 fn read_u16(cursor: &mut Cursor<&[u8]>) -> u16 {
     let mut buf = [0u8; 2];
@@ -84,4 +84,32 @@ fn golden_read_response_parses() {
     let mut payload = vec![0u8; count as usize];
     cursor.read_exact(&mut payload).unwrap();
     assert_eq!(&payload, b"hello 9p!!");
+}
+
+#[test]
+fn golden_error_response_parses() {
+    let bytes = fs::read("tests/golden_frames/rerror_response.bin").unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, RERROR);
+    assert_eq!(frame.tag, 0x2211);
+    assert_eq!(frame.size as usize, bytes.len());
+
+    let mut cursor = Cursor::new(frame.body.as_slice());
+    let message_len = read_u16(&mut cursor) as usize;
+    let mut buffer = vec![0u8; message_len];
+    cursor.read_exact(&mut buffer).unwrap();
+    assert_eq!(&buffer, b"oops");
+}
+
+#[test]
+fn golden_write_response_parses() {
+    let bytes = fs::read("tests/golden_frames/rwrite_response.bin").unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, RWRITE);
+    assert_eq!(frame.tag, 0x3344);
+    assert_eq!(frame.size as usize, bytes.len());
+
+    let mut cursor = Cursor::new(frame.body.as_slice());
+    let count = read_u32(&mut cursor);
+    assert_eq!(count, 5);
 }
