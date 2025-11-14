@@ -3,7 +3,7 @@ use std::io::{Cursor, Read};
 
 use planten_9p::RawMessage;
 use planten_9p::messages::{
-    RATTACH, RERROR, ROPEN, RREAD, RVERSION, RWALK, RWRITE, TATTACH, TVERSION,
+    RATTACH, RCLONE, RERROR, ROPEN, RREAD, RVERSION, RWALK, RWRITE, TATTACH, TVERSION,
 };
 
 fn read_u16(cursor: &mut Cursor<&[u8]>) -> u16 {
@@ -126,4 +126,18 @@ fn golden_handshake_trace_round_trips() {
         seen.push(frame.msg_type);
     }
     assert_eq!(seen, vec![TVERSION, RVERSION, TATTACH, RATTACH]);
+}
+
+#[test]
+fn golden_clone_trace_parses() {
+    let bytes = fs::read("tests/golden_traces/tclone_request.bin").unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, TCLONE);
+    assert_eq!(frame.tag, 0x9999);
+    assert_eq!(frame.size as usize, bytes.len());
+
+    let bytes = fs::read("tests/golden_traces/rclone_response.bin").unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, RCLONE);
+    assert_eq!(frame.tag, 0x9999);
 }

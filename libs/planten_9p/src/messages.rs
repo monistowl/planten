@@ -29,3 +29,5 @@ pub const TSTAT: u8 = 124;
 pub const RSTAT: u8 = 125;
 pub const TWSTAT: u8 = 126;
 pub const RWSTAT: u8 = 127;
+pub const TCLONE: u8 = 128;
+pub const RCLONE: u8 = 129;
