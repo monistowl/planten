@@ -1,3 +1,6 @@
+use std::env;
+
 fn main() {
-    println!("10_ns");
+    let args: Vec<String> = env::args().collect();
+    println!("10_ns: {:?}", args);
 }

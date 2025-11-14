@@ -1,3 +1,6 @@
+use std::env;
+
 fn main() {
-    println!("nsctl");
+    let args: Vec<String> = env::args().collect();
+    println!("nsctl: {:?}", args);
 }
