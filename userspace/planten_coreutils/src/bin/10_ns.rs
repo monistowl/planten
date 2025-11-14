@@ -1,7 +1,8 @@
-
 use std::env;
 use std::process::Command;
 use planten_ns::Namespace;
+use nix::unistd::{fork, ForkResult, execvp};
+use std::ffi::CString;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -39,11 +40,20 @@ fn main() {
             println!("unknown command: {}", input);
         }
     } else {
-        let mut cmd = Command::new(&cmd_args[0]);
-        cmd.args(&cmd_args[1..]);
-        let status = cmd.status().expect("failed to execute command");
-        if !status.success() {
-            eprintln!("command failed: {}", status);
+        let cmd = &cmd_args[0];
+        let c_cmd = CString::new(cmd.as_bytes()).unwrap();
+        let c_args: Vec<CString> = cmd_args.iter().map(|s| CString::new(s.as_bytes()).unwrap()).collect();
+
+        match unsafe{fork()} {
+            Ok(ForkResult::Parent { child, .. }) => {
+                println!("child pid: {}", child);
+            }
+            Ok(ForkResult::Child) => {
+                execvp(&c_cmd, &c_args).unwrap();
+            }
+            Err(_) => {
+                println!("Fork failed");
+            }
         }
     }
 }
