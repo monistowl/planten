@@ -6,8 +6,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use planten_9p::RawMessage;
-use planten_9p::messages::{RCLONE, RERROR, RSTAT};
+use planten_9p::messages::{RCLONE, RERROR, RSTAT, TATTACH, TCLONE, TFLUSH, TREAD, TWALK};
 use planten_fs_ramfs::{RamFs, server};
+
+const CLIENT_SESSION: &str = "libs/planten_9p/tests/golden_traces/client_session.bin";
 
 fn parse_frames(bytes: &[u8]) -> Vec<(Vec<u8>, RawMessage)> {
     let mut frames = Vec::new();
@@ -45,6 +47,26 @@ fn read_string(cursor: &mut Cursor<&[u8]>) -> io::Result<String> {
     let mut buf = vec![0u8; len];
     cursor.read_exact(&mut buf)?;
     String::from_utf8(buf).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid string"))
+}
+
+fn is_request(msg: u8) -> bool {
+    matches!(
+        msg,
+        100 | TATTACH | TWALK | TREAD | TWRITE | TREMOVE | TCLONE | TSTAT | TWSTAT | TFLUSH
+    )
+}
+
+fn run_sequence_against(addr: &str, frames: &[(Vec<u8>, RawMessage)]) -> io::Result<()> {
+    let mut stream = TcpStream::connect(addr)?;
+    for (chunk, frame) in frames {
+        if is_request(frame.msg_type) {
+            stream.write_all(chunk)?;
+        } else {
+            let response = RawMessage::read_from(&mut stream)?;
+            assert_eq!(response.msg_type, frame.msg_type);
+        }
+    }
+    Ok(())
 }
 
 #[test]
@@ -224,5 +246,26 @@ fn golden_trace_matches_server_interaction() {
     assert_eq!(actual_error.msg_type, RERROR);
 
     drop(stream);
+    server_thread.join().unwrap();
+}
+
+#[test]
+fn client_session_against_ramfs() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let ramfs = Arc::new(Mutex::new(RamFs::new()));
+    {
+        let mut guard = ramfs.lock().unwrap();
+        guard.create_file("/hello.txt", b"hello 9p!!");
+    }
+
+    let server_ramfs = Arc::clone(&ramfs);
+    let server_thread = thread::spawn(move || {
+        server::run_single(listener, server_ramfs).unwrap();
+    });
+
+    let frames = parse_frames(&fs::read(CLIENT_SESSION).unwrap());
+    run_sequence_against(&addr.to_string(), &frames).unwrap();
+
     server_thread.join().unwrap();
 }

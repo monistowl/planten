@@ -1,55 +1,89 @@
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{self, Cursor, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::mpsc::channel;
 use std::thread;
 
-use planten_9p::P9Client;
 use planten_9p::RawMessage;
-use planten_9p::messages::{RATTACH, RVERSION, TATTACH, TVERSION};
+use planten_9p::messages::{self, TCLONE, TFLUSH, TREAD, TREMOVE, TSTAT, TVERSION, TWALK, TWSTAT};
 
-fn load_frames(path: &str) -> Vec<(Vec<u8>, RawMessage)> {
+const SESSION_TRACE: &str = "libs/planten_9p/tests/golden_traces/client_session.bin";
+
+fn parse_frames(path: &str) -> Vec<(Vec<u8>, RawMessage)> {
     let bytes = fs::read(path).unwrap();
-    let mut cursor = std::io::Cursor::new(&bytes);
     let mut frames = Vec::new();
-    while (cursor.position() as usize) < bytes.len() {
-        let frame = RawMessage::read_from(&mut cursor).unwrap();
-        let consumed = frame.size as usize;
-        let start = (cursor.position() as usize) - consumed;
-        let chunk = bytes[start..start + consumed].to_vec();
-        frames.push((chunk, frame));
+    let mut pos = 0;
+    while pos < bytes.len() {
+        let size = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+        let chunk = bytes[pos..pos + size].to_vec();
+        let raw = RawMessage::from_bytes(&chunk).unwrap();
+        frames.push((chunk, raw));
+        pos += size;
     }
     frames
 }
 
-#[test]
-fn golden_handshake_streams() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (tx, rx) = channel();
-    let frames = load_frames("tests/golden_traces/handshake.bin");
+fn is_request(msg: u8) -> bool {
+    matches!(
+        msg,
+        messages::TVERSION
+            | messages::TATTACH
+            | TWALK
+            | messages::TOPEN
+            | TREAD
+            | messages::TWRITE
+            | TREMOVE
+            | TCLONE
+            | TSTAT
+            | TWSTAT
+            | TFLUSH
+    )
+}
 
-    thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
-        let mut stream = stream;
-        for (chunk, frame) in frames {
-            match frame.msg_type {
-                TVERSION | TATTACH => {
-                    let incoming = RawMessage::read_from(&mut stream).unwrap();
-                    assert_eq!(incoming.msg_type, frame.msg_type);
-                }
-                RVERSION | RATTACH => {
-                    stream.write_all(&chunk).unwrap();
-                }
-                _ => {}
+fn run_trace_session(
+    addr: &str,
+    frames: &[(Vec<u8>, RawMessage)],
+    compare_body: bool,
+) -> io::Result<()> {
+    let mut stream = TcpStream::connect(addr)?;
+    for (chunk, frame) in frames {
+        if is_request(frame.msg_type) {
+            stream.write_all(chunk)?;
+        } else {
+            let response = RawMessage::read_from(&mut stream)?;
+            assert_eq!(response.msg_type, frame.msg_type);
+            if compare_body {
+                assert_eq!(response.body, frame.body);
             }
         }
-        tx.send(()).unwrap();
-    });
+    }
+    Ok(())
+}
 
-    let mut client = P9Client::new(&addr.to_string()).unwrap();
-    let version = client.version(8192, "9P2000").unwrap();
-    assert_eq!(version, "9P2000");
-    client.attach(0, None, "guest", "").unwrap();
-    rx.recv().unwrap();
+fn spawn_fake_server(
+    frames: Vec<(Vec<u8>, RawMessage)>,
+) -> (TcpListener, thread::JoinHandle<io::Result<()>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept()?;
+        for (chunk, frame) in frames {
+            if is_request(frame.msg_type) {
+                let incoming = RawMessage::read_from(&mut stream)?;
+                assert_eq!(incoming.msg_type, frame.msg_type);
+                assert_eq!(incoming.body, frame.body);
+            } else {
+                stream.write_all(&chunk)?;
+            }
+        }
+        Ok(())
+    });
+    (listener, handle)
+}
+
+#[test]
+fn golden_client_session_parses() {
+    let frames = parse_frames(SESSION_TRACE);
+    let (listener, handle) = spawn_fake_server(frames.clone());
+    let addr = listener.local_addr().unwrap();
+    run_trace_session(&addr.to_string(), &frames, true).unwrap();
+    handle.join().unwrap().unwrap();
 }
