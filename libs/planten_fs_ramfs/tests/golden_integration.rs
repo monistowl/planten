@@ -118,6 +118,11 @@ fn golden_trace_matches_server_interaction() {
     stream.write_all(&tstat_request[0].0).unwrap();
     let actual_stat = RawMessage::read_from(&mut stream).unwrap();
     assert_eq!(actual_stat.msg_type, RSTAT);
+    let expected_stat = RawMessage::from_bytes(
+        &fs::read("../planten_9p/tests/golden_frames/rstat_response.bin").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(actual_stat.body, expected_stat.body);
     let mut stat_cursor = Cursor::new(actual_stat.body.as_slice());
     let _stat_size = read_u16(&mut stat_cursor);
     let _stat_type = read_u16(&mut stat_cursor);
@@ -136,6 +141,17 @@ fn golden_trace_matches_server_interaction() {
     let actual_write = RawMessage::read_from(&mut stream).unwrap();
     assert_eq!(actual_write.msg_type, write_exchange[1].1.msg_type);
     assert_eq!(actual_write.body, write_exchange[1].1.body);
+
+    let twstat_request =
+        parse_frames(&fs::read("../planten_9p/tests/golden_traces/twstat_request.bin").unwrap());
+    stream.write_all(&twstat_request[0].0).unwrap();
+    let actual_rwstat = RawMessage::read_from(&mut stream).unwrap();
+    let expected_rwstat = RawMessage::from_bytes(
+        &fs::read("../planten_9p/tests/golden_frames/rwstat_response.bin").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(actual_rwstat.msg_type, expected_rwstat.msg_type);
+    assert_eq!(actual_rwstat.body, expected_rwstat.body);
 
     let remove_exchange =
         parse_frames(&fs::read("../planten_9p/tests/golden_traces/remove_exchange.bin").unwrap());

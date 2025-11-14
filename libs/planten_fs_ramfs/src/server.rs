@@ -57,6 +57,7 @@ pub fn handle_client(mut stream: TcpStream, ramfs: Arc<Mutex<RamFs>>) -> io::Res
             TOPEN => handle_open(&mut stream, message.tag, &message.body, &fid_paths, &ramfs)?,
             TREAD => handle_read(&mut stream, message.tag, &message.body, &fid_paths, &ramfs)?,
             TWRITE => handle_write(&mut stream, message.tag, &message.body, &fid_paths, &ramfs)?,
+            TWSTAT => handle_wstat(&mut stream, message.tag, &message.body, &fid_paths, &ramfs)?,
             TREMOVE => handle_remove(
                 &mut stream,
                 message.tag,
@@ -254,6 +255,23 @@ fn handle_write(
     let mut response = Vec::new();
     response.extend_from_slice(&count.to_le_bytes());
     send_response(stream, RWRITE, tag, &response)
+}
+
+fn handle_wstat(
+    stream: &mut TcpStream,
+    tag: u16,
+    body: &[u8],
+    fid_paths: &HashMap<u32, String>,
+    _ramfs: &Arc<Mutex<RamFs>>,
+) -> io::Result<()> {
+    let mut cursor = Cursor::new(body);
+    let fid = read_u32(&mut cursor)?;
+    if !fid_paths.contains_key(&fid) {
+        return send_error(stream, tag, "unknown fid");
+    }
+    // skip stat for now by reading length
+    let _stat_size = read_u16(&mut cursor)?;
+    send_response(stream, RWSTAT, tag, &[])
 }
 
 fn handle_remove(
