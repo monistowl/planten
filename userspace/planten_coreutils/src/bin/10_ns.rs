@@ -1,4 +1,6 @@
+
 use std::env;
+use std::process::Command;
 use planten_ns::Namespace;
 
 fn main() {
@@ -37,6 +39,11 @@ fn main() {
             println!("unknown command: {}", input);
         }
     } else {
-        println!("executing command: {:?}", cmd_args);
+        let mut cmd = Command::new(&cmd_args[0]);
+        cmd.args(&cmd_args[1..]);
+        let status = cmd.status().expect("failed to execute command");
+        if !status.success() {
+            eprintln!("command failed: {}", status);
+        }
     }
 }
