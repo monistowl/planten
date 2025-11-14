@@ -1,16 +1,17 @@
-
-use std::env;
-use std::process::Command;
-use planten_ns::{Namespace, Mount};
-use nix::unistd::{fork, ForkResult, execvp};
-use nix::sched::{unshare, CloneFlags};
-use nix::mount::{mount, MsFlags};
-use std::ffi::CString;
-use tempfile::tempdir;
-use std::io::{self, Write};
-use std::fs::File;
+use nix::mount::{MsFlags, mount};
+use nix::sched::{CloneFlags, unshare};
+use nix::unistd::{ForkResult, execvp, fork};
+use planten_ns::{Mount, Namespace};
 use std::collections::HashMap;
-use std::net::TcpStream;
+use std::env;
+use std::ffi::CString;
+use std::fs::{self, File};
+use std::io::{self, Write};
+use std::path::Path;
+use std::process::Command;
+use tempfile::tempdir;
+
+const DEFAULT_9P_PORT: u16 = 564;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -24,7 +25,7 @@ fn main() {
                     eprintln!("-b requires two arguments");
                     return;
                 }
-                ns.bind(&args[i+1], &args[i+2]);
+                ns.bind(&args[i + 1], &args[i + 2]);
                 i += 3;
             }
             "-u" => {
@@ -32,7 +33,7 @@ fn main() {
                     eprintln!("-u requires two arguments");
                     return;
                 }
-                ns.union(&args[i+1], &args[i+2]);
+                ns.union(&args[i + 1], &args[i + 2]);
                 i += 3;
             }
             "-p9" => {
@@ -40,7 +41,7 @@ fn main() {
                     eprintln!("-p9 requires three arguments: <new> <addr> <path>");
                     return;
                 }
-                ns.p9(&args[i+1], &args[i+2], &args[i+3]);
+                ns.p9(&args[i + 1], &args[i + 2], &args[i + 3]);
                 i += 4;
             }
             _ => {
@@ -112,9 +113,9 @@ fn main() {
 
             if let Some(builtin) = builtins.get(command) {
                 builtin(args, &mut ns);
-                if let Err(e) = File::create("/tmp/ns.json")
-                    .and_then(|mut file| file.write_all(serde_json::to_string_pretty(&ns).unwrap().as_bytes()))
-                {
+                if let Err(e) = File::create("/tmp/ns.json").and_then(|mut file| {
+                    file.write_all(serde_json::to_string_pretty(&ns).unwrap().as_bytes())
+                }) {
                     eprintln!("Failed to write namespace file: {}", e);
                 }
             } else {
@@ -136,9 +137,12 @@ fn main() {
     } else {
         let cmd = &cmd_args[0];
         let c_cmd = CString::new(cmd.as_bytes()).unwrap();
-        let c_args: Vec<CString> = cmd_args.iter().map(|s| CString::new(s.as_bytes()).unwrap()).collect();
+        let c_args: Vec<CString> = cmd_args
+            .iter()
+            .map(|s| CString::new(s.as_bytes()).unwrap())
+            .collect();
 
-        match unsafe{fork()} {
+        match unsafe { fork() } {
             Ok(ForkResult::Parent { child, .. }) => {
                 println!("child pid: {}", child);
             }
@@ -149,13 +153,19 @@ fn main() {
                 }
                 for (new, old) in ns.mounts() {
                     match old {
-                        Mount::Bind{path} => {
-                            if let Err(e) = mount(Some(path.as_str()), new.as_str(), None, MsFlags::MS_BIND, None) {
+                        Mount::Bind { path } => {
+                            if let Err(e) = mount(
+                                Some(path.as_str()),
+                                new.as_str(),
+                                None,
+                                MsFlags::MS_BIND,
+                                None,
+                            ) {
                                 eprintln!("Failed to bind mount {} to {}: {}", path, new, e);
                             }
                         }
-                        Mount::Union{paths} => {
-                            let tmp_dir = match tempfile::tempdir() {
+                        Mount::Union { paths } => {
+                            let tmp_dir = match tempdir() {
                                 Ok(dir) => dir,
                                 Err(e) => {
                                     eprintln!("Failed to create temp dir: {}", e);
@@ -164,25 +174,43 @@ fn main() {
                             };
                             for path in paths {
                                 let target = tmp_dir.path().join(path.split('/').last().unwrap());
-                                if let Err(e) = mount(Some(path.as_str()), target.to_str().unwrap(), None, MsFlags::MS_BIND, None) {
-                                    eprintln!("Failed to bind mount {} to {:?}: {}", path, target, e);
+                                if let Err(e) = mount(
+                                    Some(path.as_str()),
+                                    target.to_str().unwrap(),
+                                    None,
+                                    MsFlags::MS_BIND,
+                                    None,
+                                ) {
+                                    eprintln!(
+                                        "Failed to bind mount {} to {:?}: {}",
+                                        path, target, e
+                                    );
                                 }
                             }
-                            if let Err(e) = mount(Some(tmp_dir.path().to_str().unwrap()), new.as_str(), None, MsFlags::MS_BIND, None) {
-                                eprintln!("Failed to bind mount {:?} to {}: {}", tmp_dir.path(), new, e);
+                            if let Err(e) = mount(
+                                Some(tmp_dir.path().to_str().unwrap()),
+                                new.as_str(),
+                                None,
+                                MsFlags::MS_BIND,
+                                None,
+                            ) {
+                                eprintln!(
+                                    "Failed to bind mount {:?} to {}: {}",
+                                    tmp_dir.path(),
+                                    new,
+                                    e
+                                );
                             }
                         }
-                        Mount::P9{addr, path} => {
-                            let mut stream = match TcpStream::connect(addr) {
-                                Ok(stream) => stream,
-                                Err(e) => {
-                                    eprintln!("Failed to connect to 9P server at {}: {}", addr, e);
-                                    return;
-                                }
-                            };
-                            // For now, just print a message
-                            println!("Connected to 9P server at {} for path {}", addr, path);
-                            // TODO: Implement 9P protocol and actual mount
+                        Mount::P9 { addr, path } => {
+                            if let Err(e) = mount_9p_target(new, addr, path) {
+                                eprintln!(
+                                    "Failed to mount 9P {}@{} onto {}: {}",
+                                    path, addr, new, e
+                                );
+                            } else {
+                                println!("Mounted 9P {}@{} onto {}", path, addr, new);
+                            }
                         }
                     }
                 }
@@ -195,4 +223,94 @@ fn main() {
             }
         }
     }
+}
+
+fn mount_9p_target(target: &str, addr: &str, remote_path: &str) -> Result<(), String> {
+    ensure_mount_point(target).map_err(|e| format!("invalid mount point {}: {}", target, e))?;
+
+    let remote = if remote_path.is_empty() {
+        "/"
+    } else {
+        remote_path
+    };
+    let (host, port) = parse_9p_addr(addr)?;
+
+    let source = host.clone();
+    let mut options = format!("trans=tcp,port={},aname={}", port, remote);
+    options.push_str(",msize=131072,cache=loose");
+
+    mount(
+        Some(source.as_str()),
+        target,
+        Some("9p"),
+        MsFlags::empty(),
+        Some(options.as_str()),
+    )
+    .map_err(|e| format!("mount system call failed: {}", e))
+}
+
+fn ensure_mount_point(target: &str) -> io::Result<()> {
+    let mount_point = Path::new(target);
+    if mount_point.exists() {
+        if mount_point.is_dir() {
+            return Ok(());
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("{} exists and is not a directory", target),
+        ));
+    }
+    fs::create_dir_all(mount_point)
+}
+
+fn parse_9p_addr(addr: &str) -> Result<(String, u16), String> {
+    if addr.trim().is_empty() {
+        return Err("address is empty".to_string());
+    }
+
+    if addr.contains('!') {
+        let parts: Vec<&str> = addr.split('!').filter(|s| !s.is_empty()).collect();
+        if parts.len() < 2 {
+            return Err(format!("invalid 9P addr '{}'", addr));
+        }
+        let port_part = parts.last().unwrap();
+        let host_part = parts[parts.len() - 2];
+        let port = port_part
+            .parse::<u16>()
+            .map_err(|_| format!("invalid port '{}' in addr '{}'", port_part, addr))?;
+        return Ok((host_part.to_string(), port));
+    }
+
+    if addr.starts_with('[') {
+        if let Some(end_idx) = addr.find(']') {
+            let host = addr[1..end_idx].to_string();
+            if addr.len() > end_idx + 1 {
+                let remainder = &addr[end_idx + 1..];
+                if remainder.starts_with(':') && remainder.len() > 1 {
+                    let port_str = &remainder[1..];
+                    let port = port_str
+                        .parse::<u16>()
+                        .map_err(|_| format!("invalid port '{}' in addr '{}'", port_str, addr))?;
+                    return Ok((host, port));
+                }
+            }
+            return Ok((host, DEFAULT_9P_PORT));
+        } else {
+            return Err(format!("invalid IPv6 addr '{}'", addr));
+        }
+    }
+
+    let colon_count = addr.matches(':').count();
+    if colon_count == 1 {
+        if let Some(idx) = addr.rfind(':') {
+            let host = addr[..idx].to_string();
+            let port_str = &addr[idx + 1..];
+            let port = port_str
+                .parse::<u16>()
+                .map_err(|_| format!("invalid port '{}' in addr '{}'", port_str, addr))?;
+            return Ok((host, port));
+        }
+    }
+
+    Ok((addr.to_string(), DEFAULT_9P_PORT))
 }
