@@ -1,12 +1,12 @@
-
 use std::env;
 use std::process::Command;
-use planten_ns::{Namespace, Mount};
+use planten_ns::Namespace;
 use nix::unistd::{fork, ForkResult, execvp};
 use nix::sched::{unshare, CloneFlags};
 use nix::mount::{mount, MsFlags};
 use std::ffi::CString;
 use tempfile::tempdir;
+use std::io::{self, Write};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -33,15 +33,30 @@ fn main() {
     if cmd_args.is_empty() {
         // basic shell
         loop {
+            print!("> ");
+            io::stdout().flush().unwrap();
+
             let mut input = String::new();
-            if std::io::stdin().read_line(&mut input).unwrap() == 0 {
+            if io::stdin().read_line(&mut input).unwrap() == 0 {
                 break;
             }
+
             let input = input.trim();
             if input == "exit" {
                 break;
             }
-            println!("unknown command: {}", input);
+
+            let mut parts = input.split_whitespace();
+            let command = parts.next().unwrap();
+            let args = parts;
+
+            let mut cmd = Command::new(command);
+            cmd.args(args);
+
+            let status = cmd.status().expect("failed to execute command");
+            if !status.success() {
+                eprintln!("command failed: {}", status);
+            }
         }
     } else {
         let cmd = &cmd_args[0];
