@@ -171,6 +171,17 @@ fn golden_trace_matches_server_interaction() {
     assert_eq!(actual_walk_error.msg_type, expected_walk_error.msg_type);
     assert_eq!(actual_walk_error.body, expected_walk_error.body);
 
+    let flush_request =
+        parse_frames(&fs::read("../planten_9p/tests/golden_traces/tflush_request.bin").unwrap());
+    stream.write_all(&flush_request[0].0).unwrap();
+    let actual_flush = RawMessage::read_from(&mut stream).unwrap();
+    let expected_flush = RawMessage::from_bytes(
+        &fs::read("../planten_9p/tests/golden_traces/rflush_response.bin").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(actual_flush.msg_type, expected_flush.msg_type);
+    assert_eq!(actual_flush.body, expected_flush.body);
+
     // After removal the same read request should produce an error
     stream.write_all(&read_exchange[0].0).unwrap();
     let actual_error = RawMessage::read_from(&mut stream).unwrap();

@@ -58,6 +58,7 @@ pub fn handle_client(mut stream: TcpStream, ramfs: Arc<Mutex<RamFs>>) -> io::Res
             TREAD => handle_read(&mut stream, message.tag, &message.body, &fid_paths, &ramfs)?,
             TWRITE => handle_write(&mut stream, message.tag, &message.body, &fid_paths, &ramfs)?,
             TWSTAT => handle_wstat(&mut stream, message.tag, &message.body, &fid_paths, &ramfs)?,
+            TFLUSH => handle_flush(&mut stream, message.tag, &message.body)?,
             TREMOVE => handle_remove(
                 &mut stream,
                 message.tag,
@@ -272,6 +273,10 @@ fn handle_wstat(
     // skip stat for now by reading length
     let _stat_size = read_u16(&mut cursor)?;
     send_response(stream, RWSTAT, tag, &[])
+}
+
+fn handle_flush(stream: &mut TcpStream, tag: u16, _body: &[u8]) -> io::Result<()> {
+    send_response(stream, RFLUSH, tag, &[])
 }
 
 fn handle_remove(
