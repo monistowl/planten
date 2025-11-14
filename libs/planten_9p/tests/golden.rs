@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{Cursor, Read};
 
 use planten_9p::RawMessage;
-use planten_9p::messages::{RERROR, ROPEN, RREAD, RVERSION, RWALK, RWRITE};
+use planten_9p::messages::{RATTACH, RERROR, ROPEN, RREAD, RWRITE, RVERSION, RWALK, TATTACH, TVERSION};
 
 fn read_u16(cursor: &mut Cursor<&[u8]>) -> u16 {
     let mut buf = [0u8; 2];
@@ -112,4 +112,16 @@ fn golden_write_response_parses() {
     let mut cursor = Cursor::new(frame.body.as_slice());
     let count = read_u32(&mut cursor);
     assert_eq!(count, 5);
+}
+
+#[test]
+fn golden_handshake_trace_round_trips() {
+    let bytes = fs::read("tests/golden_traces/handshake.bin").unwrap();
+    let mut cursor = Cursor::new(bytes.as_slice());
+    let mut seen = Vec::new();
+    while (cursor.position() as usize) < bytes.len() {
+        let frame = RawMessage::read_from(&mut cursor).unwrap();
+        seen.push(frame.msg_type);
+    }
+    assert_eq!(seen, vec![TVERSION, RVERSION, TATTACH, RATTACH]);
 }
