@@ -1,5 +1,5 @@
-
 use std::collections::HashMap;
+use planten_fs_core::FsServer;
 
 pub struct Inode {
     pub name: String,
@@ -69,5 +69,52 @@ impl RamFs {
             }
         }
         Some(current.children.keys().map(|s| s.as_str()).collect())
+    }
+}
+
+impl FsServer for RamFs {
+    fn walk(&self, path: &str) -> Option<Vec<String>> {
+        self.list_dir(path).map(|v| v.into_iter().map(|s| s.to_string()).collect())
+    }
+
+    fn open(&self, path: &str) -> Option<()> {
+        self.read_file(path).map(|_| ())
+    }
+
+    fn read(&self, path: &str) -> Option<&[u8]> {
+        self.read_file(path)
+    }
+
+    fn write(&mut self, path: &str, data: &[u8]) -> Option<()> {
+        self.create_file(path, data);
+        Some(())
+    }
+
+    fn clunk(&self, _path: &str) -> Option<()> {
+        Some(())
+    }
+
+    fn remove(&mut self, path: &str) -> Option<()> {
+        let mut current = &mut self.root;
+        let components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        for (i, component) in components.iter().enumerate() {
+            if i == components.len() - 1 {
+                return current.children.remove(*component).map(|_| ());
+            }
+            if let Some(node) = current.children.get_mut(*component) {
+                current = node;
+            } else {
+                return None;
+            }
+        }
+        None
+    }
+
+    fn stat(&self, path: &str) -> Option<()> {
+        self.read_file(path).map(|_| ())
+    }
+
+    fn wstat(&mut self, _path: &str) -> Option<()> {
+        Some(())
     }
 }

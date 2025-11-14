@@ -10,6 +10,7 @@ use tempfile::tempdir;
 use std::io::{self, Write};
 use std::fs::File;
 use std::collections::HashMap;
+use std::net::TcpStream;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -33,6 +34,14 @@ fn main() {
                 }
                 ns.union(&args[i+1], &args[i+2]);
                 i += 3;
+            }
+            "-p9" => {
+                if i + 3 >= args.len() {
+                    eprintln!("-p9 requires three arguments: <new> <addr> <path>");
+                    return;
+                }
+                ns.p9(&args[i+1], &args[i+2], &args[i+3]);
+                i += 4;
             }
             _ => {
                 break;
@@ -146,7 +155,7 @@ fn main() {
                             }
                         }
                         Mount::Union{paths} => {
-                            let tmp_dir = match tempdir() {
+                            let tmp_dir = match tempfile::tempdir() {
                                 Ok(dir) => dir,
                                 Err(e) => {
                                     eprintln!("Failed to create temp dir: {}", e);
@@ -162,6 +171,18 @@ fn main() {
                             if let Err(e) = mount(Some(tmp_dir.path().to_str().unwrap()), new.as_str(), None, MsFlags::MS_BIND, None) {
                                 eprintln!("Failed to bind mount {:?} to {}: {}", tmp_dir.path(), new, e);
                             }
+                        }
+                        Mount::P9{addr, path} => {
+                            let mut stream = match TcpStream::connect(addr) {
+                                Ok(stream) => stream,
+                                Err(e) => {
+                                    eprintln!("Failed to connect to 9P server at {}: {}", addr, e);
+                                    return;
+                                }
+                            };
+                            // For now, just print a message
+                            println!("Connected to 9P server at {} for path {}", addr, path);
+                            // TODO: Implement 9P protocol and actual mount
                         }
                     }
                 }

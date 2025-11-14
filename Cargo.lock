@@ -142,13 +142,21 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "nix",
+ "planten_9p",
  "planten_ns",
  "tempfile",
 ]
 
 [[package]]
+name = "planten_fs_core"
+version = "0.1.0"
+
+[[package]]
 name = "planten_fs_ramfs"
 version = "0.1.0"
+dependencies = [
+ "planten_fs_core",
+]
 
 [[package]]
 name = "planten_ns"

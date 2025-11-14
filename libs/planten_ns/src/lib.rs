@@ -1,4 +1,3 @@
-
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 
@@ -9,6 +8,10 @@ pub enum Mount {
     },
     Union {
         paths: Vec<String>,
+    },
+    P9 {
+        addr: String,
+        path: String,
     },
 }
 
@@ -37,6 +40,10 @@ impl Namespace {
         if let Mount::Union { paths } = mount {
             paths.push(old.to_string());
         }
+    }
+
+    pub fn p9(&mut self, new: &str, addr: &str, path: &str) {
+        self.add_mount(new, Mount::P9 { addr: addr.to_string(), path: path.to_string() });
     }
 
     pub fn mounts(&self) -> &HashMap<String, Mount> {
