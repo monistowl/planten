@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+planten_ns = { version = "0.1.0", path = "../../libs/planten_ns" }
+
+[dev-dependencies]
+assert_cmd = "2.1.1"
