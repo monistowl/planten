@@ -1,7 +1,9 @@
 use std::env;
 use std::process::Command;
-use planten_ns::Namespace;
+use planten_ns::{Namespace, Mount};
 use nix::unistd::{fork, ForkResult, execvp};
+use nix::sched::{unshare, CloneFlags};
+use nix::mount::{mount, MsFlags};
 use std::ffi::CString;
 
 fn main() {
@@ -49,6 +51,17 @@ fn main() {
                 println!("child pid: {}", child);
             }
             Ok(ForkResult::Child) => {
+                unshare(CloneFlags::CLONE_NEWNS).unwrap();
+                for (new, old) in ns.mounts() {
+                    match old {
+                        Mount::Bind{path} => {
+                            mount(Some(path.as_str()), new.as_str(), None, MsFlags::MS_BIND, None).unwrap();
+                        }
+                        Mount::Union{paths} => {
+                            // not implemented
+                        }
+                    }
+                }
                 execvp(&c_cmd, &c_args).unwrap();
             }
             Err(_) => {

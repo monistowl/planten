@@ -1,4 +1,3 @@
-
 use std::collections::HashMap;
 
 pub enum Mount {
@@ -34,5 +33,9 @@ impl Namespace {
         if let Mount::Union { paths } = mount {
             paths.push(old.to_string());
         }
+    }
+
+    pub fn mounts(&self) -> &HashMap<String, Mount> {
+        &self.mounts
     }
 }
