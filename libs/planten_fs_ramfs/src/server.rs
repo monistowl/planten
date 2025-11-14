@@ -57,6 +57,13 @@ pub fn handle_client(mut stream: TcpStream, ramfs: Arc<Mutex<RamFs>>) -> io::Res
             TOPEN => handle_open(&mut stream, message.tag, &message.body, &fid_paths, &ramfs)?,
             TREAD => handle_read(&mut stream, message.tag, &message.body, &fid_paths, &ramfs)?,
             TWRITE => handle_write(&mut stream, message.tag, &message.body, &fid_paths, &ramfs)?,
+            TREMOVE => handle_remove(
+                &mut stream,
+                message.tag,
+                &message.body,
+                &mut fid_paths,
+                &ramfs,
+            )?,
             TCLUNK => handle_clunk(&mut stream, message.tag, &message.body, &mut fid_paths)?,
             _ => send_error(&mut stream, message.tag, "unsupported message")?,
         }
@@ -240,6 +247,35 @@ fn handle_write(
     let mut response = Vec::new();
     response.extend_from_slice(&count.to_le_bytes());
     send_response(stream, RWRITE, tag, &response)
+}
+
+fn handle_remove(
+    stream: &mut TcpStream,
+    tag: u16,
+    body: &[u8],
+    fid_paths: &mut HashMap<u32, String>,
+    ramfs: &Arc<Mutex<RamFs>>,
+) -> io::Result<()> {
+    let mut cursor = Cursor::new(body);
+    let fid = read_u32(&mut cursor)?;
+
+    let path = match fid_paths.get(&fid).cloned() {
+        Some(path) => path,
+        None => return send_error(stream, tag, "unknown fid"),
+    };
+
+    let success = {
+        let mut guard = ramfs.lock().unwrap();
+        guard.remove(&path).is_some()
+    };
+
+    fid_paths.remove(&fid);
+
+    if success {
+        send_response(stream, RREMOVE, tag, &[])
+    } else {
+        send_error(stream, tag, "remove failed")
+    }
 }
 
 fn handle_clunk(

@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use planten_9p::RawMessage;
+use planten_9p::messages::RERROR;
 use planten_fs_ramfs::{RamFs, server};
 
 fn parse_frames(bytes: &[u8]) -> Vec<(Vec<u8>, RawMessage)> {
@@ -81,6 +82,17 @@ fn golden_trace_matches_server_interaction() {
     let actual_write = RawMessage::read_from(&mut stream).unwrap();
     assert_eq!(actual_write.msg_type, write_exchange[1].1.msg_type);
     assert_eq!(actual_write.body, write_exchange[1].1.body);
+
+    let remove_exchange =
+        parse_frames(&fs::read("../planten_9p/tests/golden_traces/remove_exchange.bin").unwrap());
+    stream.write_all(&remove_exchange[0].0).unwrap();
+    let actual_remove = RawMessage::read_from(&mut stream).unwrap();
+    assert_eq!(actual_remove.msg_type, remove_exchange[1].1.msg_type);
+
+    // After removal the same read request should produce an error
+    stream.write_all(&read_exchange[0].0).unwrap();
+    let actual_error = RawMessage::read_from(&mut stream).unwrap();
+    assert_eq!(actual_error.msg_type, RERROR);
 
     drop(stream);
     server_thread.join().unwrap();

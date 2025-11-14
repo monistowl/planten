@@ -12,6 +12,7 @@ fn test_mount_bind() {
 fn test_mount_union() {
     let mut cmd = Command::cargo_bin("mount").unwrap();
     cmd.arg("/new").arg("/old1").arg("/old2");
-    cmd.assert().success().stdout("created union mount at '/new'\n");
+    cmd.assert()
+        .success()
+        .stdout("created union mount at '/new'\n");
 }
-
