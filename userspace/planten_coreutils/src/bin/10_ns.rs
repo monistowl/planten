@@ -1,3 +1,4 @@
+
 use std::env;
 use std::process::Command;
 use planten_ns::{Namespace, Mount};
@@ -5,6 +6,7 @@ use nix::unistd::{fork, ForkResult, execvp};
 use nix::sched::{unshare, CloneFlags};
 use nix::mount::{mount, MsFlags};
 use std::ffi::CString;
+use tempfile::tempdir;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -58,7 +60,12 @@ fn main() {
                             mount(Some(path.as_str()), new.as_str(), None, MsFlags::MS_BIND, None).unwrap();
                         }
                         Mount::Union{paths} => {
-                            // not implemented
+                            let tmp_dir = tempdir().unwrap();
+                            for path in paths {
+                                let target = tmp_dir.path().join(path.split('/').last().unwrap());
+                                mount(Some(path.as_str()), target.to_str().unwrap(), None, MsFlags::MS_BIND, None).unwrap();
+                            }
+                            mount(Some(tmp_dir.path().to_str().unwrap()), new.as_str(), None, MsFlags::MS_BIND, None).unwrap();
                         }
                     }
                 }
