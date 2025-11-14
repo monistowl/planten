@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use planten_fs_core::FsServer;
+use std::collections::HashMap;
 
 pub struct Inode {
     pub name: String,
@@ -37,7 +37,10 @@ impl RamFs {
                 file.data = data.to_vec();
                 current.children.insert(component.to_string(), file);
             } else {
-                current = current.children.entry(component.to_string()).or_insert_with(|| Inode::new(component));
+                current = current
+                    .children
+                    .entry(component.to_string())
+                    .or_insert_with(|| Inode::new(component));
             }
         }
     }
@@ -74,7 +77,8 @@ impl RamFs {
 
 impl FsServer for RamFs {
     fn walk(&self, path: &str) -> Option<Vec<String>> {
-        self.list_dir(path).map(|v| v.into_iter().map(|s| s.to_string()).collect())
+        self.list_dir(path)
+            .map(|v| v.into_iter().map(|s| s.to_string()).collect())
     }
 
     fn open(&self, path: &str) -> Option<()> {
@@ -118,3 +122,5 @@ impl FsServer for RamFs {
         Some(())
     }
 }
+
+pub mod server;

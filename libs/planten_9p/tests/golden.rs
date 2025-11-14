@@ -2,7 +2,9 @@ use std::fs;
 use std::io::{Cursor, Read};
 
 use planten_9p::RawMessage;
-use planten_9p::messages::{RATTACH, RERROR, ROPEN, RREAD, RWRITE, RVERSION, RWALK, TATTACH, TVERSION};
+use planten_9p::messages::{
+    RATTACH, RERROR, ROPEN, RREAD, RVERSION, RWALK, RWRITE, TATTACH, TVERSION,
+};
 
 fn read_u16(cursor: &mut Cursor<&[u8]>) -> u16 {
     let mut buf = [0u8; 2];
