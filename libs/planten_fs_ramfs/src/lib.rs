@@ -1,3 +1,4 @@
+
 use std::collections::HashMap;
 
 pub struct Inode {
@@ -39,5 +40,34 @@ impl RamFs {
                 current = current.children.entry(component.to_string()).or_insert_with(|| Inode::new(component));
             }
         }
+    }
+
+    pub fn read_file(&self, path: &str) -> Option<&[u8]> {
+        let mut current = &self.root;
+        let components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        for (i, component) in components.iter().enumerate() {
+            if let Some(node) = current.children.get(*component) {
+                if i == components.len() - 1 {
+                    return Some(&node.data);
+                }
+                current = node;
+            } else {
+                return None;
+            }
+        }
+        None
+    }
+
+    pub fn list_dir(&self, path: &str) -> Option<Vec<&str>> {
+        let mut current = &self.root;
+        let components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        for component in components {
+            if let Some(node) = current.children.get(component) {
+                current = node;
+            } else {
+                return None;
+            }
+        }
+        Some(current.children.keys().map(|s| s.as_str()).collect())
     }
 }
