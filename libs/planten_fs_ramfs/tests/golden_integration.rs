@@ -159,6 +159,18 @@ fn golden_trace_matches_server_interaction() {
     let actual_remove = RawMessage::read_from(&mut stream).unwrap();
     assert_eq!(actual_remove.msg_type, remove_exchange[1].1.msg_type);
 
+    let error_walk = parse_frames(
+        &fs::read("../planten_9p/tests/golden_traces/twalk_error_request.bin").unwrap(),
+    );
+    stream.write_all(&error_walk[0].0).unwrap();
+    let actual_walk_error = RawMessage::read_from(&mut stream).unwrap();
+    let expected_walk_error = RawMessage::from_bytes(
+        &fs::read("../planten_9p/tests/golden_traces/rerror_walk.bin").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(actual_walk_error.msg_type, expected_walk_error.msg_type);
+    assert_eq!(actual_walk_error.body, expected_walk_error.body);
+
     // After removal the same read request should produce an error
     stream.write_all(&read_exchange[0].0).unwrap();
     let actual_error = RawMessage::read_from(&mut stream).unwrap();
