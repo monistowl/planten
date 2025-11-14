@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use planten_9p::RawMessage;
-use planten_9p::messages::{RERROR, RSTAT};
+use planten_9p::messages::{RCLONE, RERROR, RSTAT};
 use planten_fs_ramfs::{RamFs, server};
 
 fn parse_frames(bytes: &[u8]) -> Vec<(Vec<u8>, RawMessage)> {
@@ -181,6 +181,13 @@ fn golden_trace_matches_server_interaction() {
     .unwrap();
     assert_eq!(actual_flush.msg_type, expected_flush.msg_type);
     assert_eq!(actual_flush.body, expected_flush.body);
+
+    let clone_request =
+        parse_frames(&fs::read("../planten_9p/tests/golden_traces/tclone_request.bin").unwrap());
+    stream.write_all(&clone_request[0].0).unwrap();
+    let actual_clone = RawMessage::read_from(&mut stream).unwrap();
+    assert_eq!(actual_clone.msg_type, RCLONE);
+    assert_eq!(actual_clone.tag, 0x9999);
 
     // After removal the same read request should produce an error
     stream.write_all(&read_exchange[0].0).unwrap();
