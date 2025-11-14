@@ -159,17 +159,23 @@ fn golden_trace_matches_server_interaction() {
     let actual_remove = RawMessage::read_from(&mut stream).unwrap();
     assert_eq!(actual_remove.msg_type, remove_exchange[1].1.msg_type);
 
-    let error_walk = parse_frames(
-        &fs::read("../planten_9p/tests/golden_traces/twalk_error_request.bin").unwrap(),
-    );
-    stream.write_all(&error_walk[0].0).unwrap();
-    let actual_walk_error = RawMessage::read_from(&mut stream).unwrap();
-    let expected_walk_error = RawMessage::from_bytes(
-        &fs::read("../planten_9p/tests/golden_traces/rerror_walk.bin").unwrap(),
-    )
-    .unwrap();
-    assert_eq!(actual_walk_error.msg_type, expected_walk_error.msg_type);
-    assert_eq!(actual_walk_error.body, expected_walk_error.body);
+    for (req_path, resp_path) in &[
+        (
+            "../planten_9p/tests/golden_traces/twalk_error_request.bin",
+            "../planten_9p/tests/golden_traces/rerror_walk.bin",
+        ),
+        (
+            "../planten_9p/tests/golden_traces/twalk_multi_request.bin",
+            "../planten_9p/tests/golden_traces/rerror_walk_multi.bin",
+        ),
+    ] {
+        let error_walk = parse_frames(&fs::read(req_path).unwrap());
+        stream.write_all(&error_walk[0].0).unwrap();
+        let actual_walk_error = RawMessage::read_from(&mut stream).unwrap();
+        let expected_walk_error = RawMessage::from_bytes(&fs::read(resp_path).unwrap()).unwrap();
+        assert_eq!(actual_walk_error.msg_type, expected_walk_error.msg_type);
+        assert_eq!(actual_walk_error.body, expected_walk_error.body);
+    }
 
     let flush_request =
         parse_frames(&fs::read("../planten_9p/tests/golden_traces/tflush_request.bin").unwrap());
