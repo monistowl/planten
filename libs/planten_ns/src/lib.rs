@@ -1,5 +1,8 @@
-use std::collections::HashMap;
 
+use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize)]
 pub enum Mount {
     Bind {
         path: String,
@@ -9,6 +12,7 @@ pub enum Mount {
     },
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Namespace {
     mounts: HashMap<String, Mount>,
 }
