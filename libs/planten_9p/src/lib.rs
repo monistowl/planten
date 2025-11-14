@@ -167,7 +167,7 @@ fn ensure_msg_type(response: &RawMessage, expected: u8) -> io::Result<()> {
     Ok(())
 }
 
-fn build_frame(msg_type: u8, tag: u16, body: &[u8]) -> Vec<u8> {
+pub fn build_frame(msg_type: u8, tag: u16, body: &[u8]) -> Vec<u8> {
     let size = 7 + body.len() as u32;
     let mut buffer = Vec::with_capacity(size as usize);
     buffer.extend_from_slice(&size.to_le_bytes());

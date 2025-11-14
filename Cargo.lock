@@ -156,6 +156,7 @@ version = "0.1.0"
 name = "planten_fs_ramfs"
 version = "0.1.0"
 dependencies = [
+ "planten_9p",
  "planten_fs_core",
 ]
 
