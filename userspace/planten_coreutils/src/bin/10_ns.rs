@@ -1,12 +1,14 @@
+
 use std::env;
 use std::process::Command;
-use planten_ns::Namespace;
+use planten_ns::{Namespace, Mount};
 use nix::unistd::{fork, ForkResult, execvp};
 use nix::sched::{unshare, CloneFlags};
 use nix::mount::{mount, MsFlags};
 use std::ffi::CString;
 use tempfile::tempdir;
 use std::io::{self, Write};
+use std::fs::File;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -28,6 +30,9 @@ fn main() {
             }
         }
     }
+
+    let mut file = File::create("/tmp/ns.json").unwrap();
+    file.write_all(serde_json::to_string_pretty(&ns).unwrap().as_bytes()).unwrap();
 
     let cmd_args = &args[i..];
     if cmd_args.is_empty() {
