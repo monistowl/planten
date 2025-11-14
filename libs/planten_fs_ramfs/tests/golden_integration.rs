@@ -101,6 +101,18 @@ fn golden_trace_matches_server_interaction() {
     assert_eq!(actual_read.msg_type, read_exchange[1].1.msg_type);
     assert_eq!(actual_read.body, read_exchange[1].1.body);
 
+    let dir_request =
+        parse_frames(&fs::read("../planten_9p/tests/golden_traces/tread_dir_request.bin").unwrap());
+    stream.write_all(&dir_request[0].0).unwrap();
+    let actual_dir = RawMessage::read_from(&mut stream).unwrap();
+    assert_eq!(actual_dir.msg_type, RREAD);
+    let mut dir_cursor = Cursor::new(actual_dir.body.as_slice());
+    let count = read_u32(&mut dir_cursor);
+    assert_eq!(count, 24);
+    let mut dir_buf = vec![0u8; count as usize];
+    dir_cursor.read_exact(&mut dir_buf).unwrap();
+    assert_eq!(&dir_buf, b"hello.txt\nreadme.txt\n");
+
     let tstat_request =
         parse_frames(&fs::read("../planten_9p/tests/golden_traces/tstat_request.bin").unwrap());
     stream.write_all(&tstat_request[0].0).unwrap();

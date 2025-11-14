@@ -198,7 +198,14 @@ fn handle_read(
 
     let data = {
         let guard = ramfs.lock().unwrap();
-        guard.read_file(path).map(|bytes| bytes.to_vec())
+        if let Some(bytes) = guard.read_file(path) {
+            Some(bytes.to_vec())
+        } else if let Some(entries) = guard.list_dir(path) {
+            let joined = entries.join("\n") + "\n";
+            Some(joined.into_bytes())
+        } else {
+            None
+        }
     };
 
     let data = match data {
