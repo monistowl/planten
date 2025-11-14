@@ -1,0 +1,13 @@
+[workspace]
+members = [
+    "libs/planten_9p", "libs/planten_fs_ramfs", "libs/planten_ns", "userspace/planten_coreutils",
+]
+
+[package]
+name = "planten"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]

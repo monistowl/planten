@@ -19,3 +19,20 @@ target
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+.gemini/
+gha-creds-*.json
+
+
+# Added by cargo
+
+/target
+
+# AI planning documents (ephemeral)                                    
+history/
+
+# Beads issue tracker
+.beads/
+
+# Plan 9 Port
+plan9port/
