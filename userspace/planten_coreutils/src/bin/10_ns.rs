@@ -1,17 +1,23 @@
+#[cfg(target_os = "linux")]
 use nix::mount::{MsFlags, mount};
+#[cfg(target_os = "linux")]
 use nix::sched::{CloneFlags, unshare};
 use nix::unistd::{ForkResult, execvp, fork};
+#[cfg(target_os = "linux")]
+use planten_9p::P9Client;
 use planten_ns::{Mount, Namespace};
 use std::collections::HashMap;
 use std::env;
 use std::ffi::CString;
-use std::fs::{self, File};
+#[cfg(target_os = "linux")]
+use std::fs;
+use std::fs::File;
 use std::io::{self, Write};
+#[cfg(target_os = "linux")]
 use std::path::Path;
 use std::process::Command;
+#[cfg(target_os = "linux")]
 use tempfile::tempdir;
-
-const DEFAULT_9P_PORT: u16 = 564;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -147,73 +153,92 @@ fn main() {
                 println!("child pid: {}", child);
             }
             Ok(ForkResult::Child) => {
+                #[cfg(target_os = "linux")]
                 if let Err(e) = unshare(CloneFlags::CLONE_NEWNS) {
                     eprintln!("Failed to unshare namespace: {}", e);
                     return;
                 }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    eprintln!("Skipping namespace isolation: not available on this platform");
+                }
                 for (new, old) in ns.mounts() {
-                    match old {
-                        Mount::Bind { path } => {
-                            if let Err(e) = mount(
-                                Some(path.as_str()),
-                                new.as_str(),
-                                None,
-                                MsFlags::MS_BIND,
-                                None,
-                            ) {
-                                eprintln!("Failed to bind mount {} to {}: {}", path, new, e);
-                            }
-                        }
-                        Mount::Union { paths } => {
-                            let tmp_dir = match tempdir() {
-                                Ok(dir) => dir,
-                                Err(e) => {
-                                    eprintln!("Failed to create temp dir: {}", e);
-                                    return;
-                                }
-                            };
-                            for path in paths {
-                                let target = tmp_dir.path().join(path.split('/').last().unwrap());
+                    #[cfg(target_os = "linux")]
+                    {
+                        match old {
+                            Mount::Bind { path } => {
                                 if let Err(e) = mount(
                                     Some(path.as_str()),
-                                    target.to_str().unwrap(),
+                                    new.as_str(),
+                                    None,
+                                    MsFlags::MS_BIND,
+                                    None,
+                                ) {
+                                    eprintln!("Failed to bind mount {} to {}: {}", path, new, e);
+                                }
+                            }
+                            Mount::Union { paths } => {
+                                let tmp_dir = match tempdir() {
+                                    Ok(dir) => dir,
+                                    Err(e) => {
+                                        eprintln!("Failed to create temp dir: {}", e);
+                                        return;
+                                    }
+                                };
+                                for path in paths {
+                                    let target =
+                                        tmp_dir.path().join(path.split('/').last().unwrap());
+                                    if let Err(e) = mount(
+                                        Some(path.as_str()),
+                                        target.to_str().unwrap(),
+                                        None,
+                                        MsFlags::MS_BIND,
+                                        None,
+                                    ) {
+                                        eprintln!(
+                                            "Failed to bind mount {} to {:?}: {}",
+                                            path, target, e
+                                        );
+                                    }
+                                }
+                                if let Err(e) = mount(
+                                    Some(tmp_dir.path().to_str().unwrap()),
+                                    new.as_str(),
                                     None,
                                     MsFlags::MS_BIND,
                                     None,
                                 ) {
                                     eprintln!(
-                                        "Failed to bind mount {} to {:?}: {}",
-                                        path, target, e
+                                        "Failed to bind mount {:?} to {}: {}",
+                                        tmp_dir.path(),
+                                        new,
+                                        e
                                     );
                                 }
                             }
-                            if let Err(e) = mount(
-                                Some(tmp_dir.path().to_str().unwrap()),
-                                new.as_str(),
-                                None,
-                                MsFlags::MS_BIND,
-                                None,
-                            ) {
-                                eprintln!(
-                                    "Failed to bind mount {:?} to {}: {}",
-                                    tmp_dir.path(),
-                                    new,
-                                    e
-                                );
-                            }
-                        }
-                        Mount::P9 { addr, path } => {
-                            if let Err(e) = mount_9p_target(new, addr, path) {
-                                eprintln!(
-                                    "Failed to mount 9P {}@{} onto {}: {}",
-                                    path, addr, new, e
-                                );
-                            } else {
-                                println!("Mounted 9P {}@{} onto {}", path, addr, new);
+                            Mount::P9 { addr, path } => {
+                                if let Err(err) = probe_remote_share(addr, path) {
+                                    eprintln!("Failed to probe 9P {}@{}: {}", path, addr, err);
+                                    continue;
+                                }
+                                if let Err(e) = mount_9p_target(new, addr, path) {
+                                    eprintln!(
+                                        "Failed to mount 9P {}@{} onto {}: {}",
+                                        path, addr, new, e
+                                    );
+                                } else {
+                                    println!("Mounted 9P {}@{} onto {}", path, addr, new);
+                                }
                             }
                         }
                     }
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        let _ = old;
+                        eprintln!("Skipping mount {}: Linux-only host support", new);
+                    }
                 }
+                #[allow(irrefutable_let_patterns)]
                 if let Err(e) = execvp(&c_cmd, &c_args) {
                     eprintln!("Failed to exec command: {}", e);
                 }
@@ -225,6 +250,7 @@ fn main() {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn mount_9p_target(target: &str, addr: &str, remote_path: &str) -> Result<(), String> {
     ensure_mount_point(target).map_err(|e| format!("invalid mount point {}: {}", target, e))?;
 
@@ -249,6 +275,34 @@ fn mount_9p_target(target: &str, addr: &str, remote_path: &str) -> Result<(), St
     .map_err(|e| format!("mount system call failed: {}", e))
 }
 
+#[cfg(target_os = "linux")]
+fn probe_remote_share(addr: &str, remote_path: &str) -> Result<(), String> {
+    let mut client =
+        P9Client::new(addr).map_err(|e| format!("failed to connect to {}: {}", addr, e))?;
+
+    let uname = std::env::var("USER").unwrap_or_else(|_| "guest".to_string());
+    client
+        .version(131072, "9P2000")
+        .map_err(|e| format!("version exchange failed: {}", e))?;
+    client
+        .attach(0, None, uname.as_str(), "")
+        .map_err(|e| format!("attach failed: {}", e))?;
+
+    let components: Vec<&str> = remote_path.split('/').filter(|s| !s.is_empty()).collect();
+    if !components.is_empty() {
+        client
+            .walk(0, 1, components.as_slice())
+            .map_err(|e| format!("walk failed: {}", e))?;
+        client.clunk(1).ok();
+    }
+
+    client
+        .clunk(0)
+        .map_err(|e| format!("clunk root fid failed: {}", e))?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
 fn ensure_mount_point(target: &str) -> io::Result<()> {
     let mount_point = Path::new(target);
     if mount_point.exists() {
@@ -263,6 +317,10 @@ fn ensure_mount_point(target: &str) -> io::Result<()> {
     fs::create_dir_all(mount_point)
 }
 
+#[cfg(target_os = "linux")]
+const DEFAULT_9P_PORT: u16 = 564;
+
+#[cfg(target_os = "linux")]
 fn parse_9p_addr(addr: &str) -> Result<(String, u16), String> {
     if addr.trim().is_empty() {
         return Err("address is empty".to_string());
