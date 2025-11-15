@@ -73,6 +73,24 @@ impl RamFs {
         }
         Some(current.children.keys().map(|s| s.as_str()).collect())
     }
+
+    pub fn create_dir(&mut self, path: &str) {
+        let mut current = &mut self.root;
+        let components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        for (i, component) in components.iter().enumerate() {
+            if i == components.len() - 1 {
+                current
+                    .children
+                    .entry(component.to_string())
+                    .or_insert_with(|| Inode::new(component));
+            } else {
+                current = current
+                    .children
+                    .entry(component.to_string())
+                    .or_insert_with(|| Inode::new(component));
+            }
+        }
+    }
 }
 
 impl FsServer for RamFs {
@@ -89,9 +107,23 @@ impl FsServer for RamFs {
         self.read_file(path)
     }
 
-    fn write(&mut self, path: &str, data: &[u8]) -> Option<()> {
-        self.create_file(path, data);
-        Some(())
+    fn write(&mut self, path: &str, offset: u64, data: &[u8]) -> Option<u32> {
+        let mut current = &mut self.root;
+        let components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        let (filename, path_parts) = components.split_last()?;
+
+        for part in path_parts {
+            current = current.children.get_mut(*part)?;
+        }
+
+        let node = current.children.get_mut(*filename)?;
+        let start = offset as usize;
+        let end = start + data.len();
+        if end > node.data.len() {
+            node.data.resize(end, 0);
+        }
+        node.data[start..end].copy_from_slice(data);
+        Some(data.len() as u32)
     }
 
     fn clunk(&self, _path: &str) -> Option<()> {

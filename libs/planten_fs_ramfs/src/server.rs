@@ -67,10 +67,125 @@ pub fn handle_client(mut stream: TcpStream, ramfs: Arc<Mutex<RamFs>>) -> io::Res
                 &ramfs,
             )?,
             TCLUNK => handle_clunk(&mut stream, message.tag, &message.body, &mut fid_paths)?,
+            TSTAT => handle_stat(
+                &mut stream,
+                message.tag,
+                &message.body,
+                &fid_paths,
+                &ramfs,
+            )?,
+            TCLONE => handle_clone(&mut stream, message.tag, &message.body, &mut fid_paths)?,
+            TCREATE => handle_create(
+                &mut stream,
+                message.tag,
+                &message.body,
+                &mut fid_paths,
+                &ramfs,
+            )?,
+            TAUTH => handle_auth(&mut stream, message.tag, &message.body)?,
             _ => send_error(&mut stream, message.tag, "unsupported message")?,
         }
     }
 }
+
+fn handle_auth(
+    stream: &mut TcpStream,
+    tag: u16,
+    _body: &[u8],
+) -> io::Result<()> {
+    send_error(stream, tag, "authentication not supported")
+}
+
+fn handle_create(
+    stream: &mut TcpStream,
+    tag: u16,
+    body: &[u8],
+    fid_paths: &mut HashMap<u32, String>,
+    ramfs: &Arc<Mutex<RamFs>>,
+) -> io::Result<()> {
+    let mut cursor = Cursor::new(body);
+    let fid = read_u32(&mut cursor)?;
+    let name = read_string(&mut cursor)?;
+    let perm = read_u32(&mut cursor)?;
+    let mode = read_u8(&mut cursor)?;
+
+    let path = match fid_paths.get(&fid) {
+        Some(path) => path,
+        None => {
+            return send_error(stream, tag, "unknown fid");
+        }
+    };
+
+    let new_path = resolve_step(path, &name).unwrap();
+
+    let mut guard = ramfs.lock().unwrap();
+    if guard.read_file(&new_path).is_some() || guard.list_dir(&new_path).is_some() {
+        return send_error(stream, tag, "file exists");
+    }
+
+    if perm & 0x80000000 != 0 { // DMDIR
+        guard.create_dir(&new_path);
+    } else {
+        guard.create_file(&new_path, &[]);
+    }
+
+    let mut response = Vec::new();
+    response.extend_from_slice(&encode_qid(&new_path));
+    response.extend_from_slice(&0u32.to_le_bytes());
+    send_response(stream, RCREATE, tag, &response)
+}
+
+fn handle_clone(
+    stream: &mut TcpStream,
+    tag: u16,
+    body: &[u8],
+    fid_paths: &mut HashMap<u32, String>,
+) -> io::Result<()> {
+    let mut cursor = Cursor::new(body);
+    let fid = read_u32(&mut cursor)?;
+    let newfid = read_u32(&mut cursor)?;
+
+    let path = match fid_paths.get(&fid) {
+        Some(path) => path.clone(),
+        None => {
+            return send_error(stream, tag, "unknown fid");
+        }
+    };
+
+    fid_paths.insert(newfid, path);
+
+    send_response(stream, RCLONE, tag, &[])
+}
+
+fn handle_stat(
+    stream: &mut TcpStream,
+    tag: u16,
+    body: &[u8],
+    fid_paths: &HashMap<u32, String>,
+    ramfs: &Arc<Mutex<RamFs>>,
+) -> io::Result<()> {
+    let mut cursor = Cursor::new(body);
+    let fid = read_u32(&mut cursor)?;
+
+    let path = match fid_paths.get(&fid) {
+        Some(path) => path,
+        None => {
+            return send_error(stream, tag, "unknown fid");
+        }
+    };
+
+    let guard = ramfs.lock().unwrap();
+    let stat = if let Some(data) = guard.read_file(path) {
+        build_stat(path, data.len() as u64, 0o644)
+    } else if guard.list_dir(path).is_some() {
+        build_stat(path, 0, 0o755 | 0x80000000) // DMDIR
+    } else {
+        return send_error(stream, tag, "file not found");
+    };
+
+    send_response(stream, RSTAT, tag, &stat)
+}
+
 
 fn handle_version(stream: &mut TcpStream, tag: u16, body: &[u8]) -> io::Result<()> {
     let mut cursor = Cursor::new(body);
@@ -236,7 +351,7 @@ fn handle_write(
 ) -> io::Result<()> {
     let mut cursor = Cursor::new(body);
     let fid = read_u32(&mut cursor)?;
-    let _offset = read_u64(&mut cursor)?;
+    let offset = read_u64(&mut cursor)?;
     let count = read_u32(&mut cursor)?;
     let mut buffer = vec![0u8; count as usize];
     cursor.read_exact(&mut buffer)?;
@@ -248,13 +363,13 @@ fn handle_write(
         }
     };
 
-    {
+    let written = {
         let mut guard = ramfs.lock().unwrap();
-        guard.write(path, &buffer);
-    }
+        guard.write(path, offset, &buffer).unwrap_or(0)
+    };
 
     let mut response = Vec::new();
-    response.extend_from_slice(&count.to_le_bytes());
+    response.extend_from_slice(&written.to_le_bytes());
     send_response(stream, RWRITE, tag, &response)
 }
 
@@ -355,6 +470,35 @@ fn encode_qid(path: &str) -> [u8; 13] {
     qid[1..5].copy_from_slice(&0u32.to_le_bytes());
     qid[5..13].copy_from_slice(&path_id.to_le_bytes());
     qid
+}
+
+fn build_stat(name: &str, length: u64, mode: u32) -> Vec<u8> {
+    let mut buf = Vec::new();
+    let qid = encode_qid(name);
+    let stat = vec![
+        0u16.to_le_bytes().to_vec(), // type
+        0u32.to_le_bytes().to_vec(), // dev
+        qid.to_vec(),
+        mode.to_le_bytes().to_vec(),
+        0u32.to_le_bytes().to_vec(), // atime
+        0u32.to_le_bytes().to_vec(), // mtime
+        length.to_le_bytes().to_vec(),
+        encode_string_as_bytes(name),
+        encode_string_as_bytes("user"),
+        encode_string_as_bytes("group"),
+        encode_string_as_bytes("user"),
+    ];
+    let stat_bytes: Vec<u8> = stat.into_iter().flatten().collect();
+    buf.extend_from_slice(&(stat_bytes.len() as u16).to_le_bytes());
+    buf.extend_from_slice(&stat_bytes);
+    buf
+}
+
+fn encode_string_as_bytes(s: &str) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&(s.len() as u16).to_le_bytes());
+    buf.extend_from_slice(s.as_bytes());
+    buf
 }
 
 fn path_exists(path: &str, ramfs: &Arc<Mutex<RamFs>>) -> bool {

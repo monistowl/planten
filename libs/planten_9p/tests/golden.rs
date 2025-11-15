@@ -3,7 +3,7 @@ use std::io::{Cursor, Read};
 
 use planten_9p::RawMessage;
 use planten_9p::messages::{
-    RATTACH, RCLONE, RERROR, ROPEN, RREAD, RVERSION, RWALK, RWRITE, TATTACH, TREAD, TVERSION, TWALK,
+    RATTACH, RCLONE, RERROR, ROPEN, RREAD, RSTAT, RVERSION, RWALK, RWRITE, TATTACH, TREAD, TVERSION, TWALK,
 };
 
 fn read_u16(cursor: &mut Cursor<&[u8]>) -> u16 {
@@ -167,3 +167,31 @@ fn golden_tread_oob_error_parses() {
     assert_eq!(frame.msg_type, RERROR);
     assert_eq!(frame.tag, 0x0202);
 }
+
+#[test]
+fn golden_stat_response_parses() {
+    let bytes = fs::read("tests/golden_frames/rstat_response.bin").unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, RSTAT);
+    assert_eq!(frame.tag, 0x4321);
+    assert_eq!(frame.size as usize, bytes.len());
+
+    let mut cursor = Cursor::new(frame.body.as_slice());
+    let stat_size = read_u16(&mut cursor);
+    let mut stat_buf = vec![0u8; stat_size as usize];
+    cursor.read_exact(&mut stat_buf).unwrap();
+
+    let mut stat_cursor = Cursor::new(stat_buf.as_slice());
+    let _type = read_u16(&mut stat_cursor);
+    let _dev = read_u32(&mut stat_cursor);
+    let mut qid = [0u8; 13];
+    stat_cursor.read_exact(&mut qid).unwrap();
+    let mode = read_u32(&mut stat_cursor);
+    let _atime = read_u32(&mut stat_cursor);
+    let _mtime = read_u32(&mut stat_cursor);
+    let length = u64::from_le_bytes(stat_buf[30..38].try_into().unwrap());
+    
+    assert_eq!(mode, 0o755 | 0x80000000);
+    assert_eq!(length, 0);
+}
+

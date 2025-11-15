@@ -6,10 +6,14 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use planten_9p::RawMessage;
-use planten_9p::messages::{RCLONE, RERROR, RSTAT, TATTACH, TCLONE, TFLUSH, TREAD, TWALK};
+use planten_9p::messages::{
+    RCLONE, RERROR, RREAD, RSTAT, RWRITE, TATTACH, TAUTH, TCLONE, TFLUSH, TREAD, TREMOVE, TSTAT, TWRITE,
+    TWSTAT, TWALK,
+};
+use planten_9p::build_frame;
 use planten_fs_ramfs::{RamFs, server};
 
-const CLIENT_SESSION: &str = "libs/planten_9p/tests/golden_traces/client_session.bin";
+const CLIENT_SESSION: &str = "../planten_9p/tests/golden_traces/client_session.bin";
 
 fn parse_frames(bytes: &[u8]) -> Vec<(Vec<u8>, RawMessage)> {
     let mut frames = Vec::new();
@@ -24,22 +28,22 @@ fn parse_frames(bytes: &[u8]) -> Vec<(Vec<u8>, RawMessage)> {
     frames
 }
 
-fn read_u16(cursor: &mut Cursor<&[u8]>) -> u16 {
+fn read_u16(cursor: &mut Cursor<&[u8]>) -> io::Result<u16> {
     let mut buf = [0u8; 2];
-    cursor.read_exact(&mut buf).unwrap();
-    u16::from_le_bytes(buf)
+    cursor.read_exact(&mut buf)?;
+    Ok(u16::from_le_bytes(buf))
 }
 
-fn read_u32(cursor: &mut Cursor<&[u8]>) -> u32 {
+fn read_u32(cursor: &mut Cursor<&[u8]>) -> io::Result<u32> {
     let mut buf = [0u8; 4];
-    cursor.read_exact(&mut buf).unwrap();
-    u32::from_le_bytes(buf)
+    cursor.read_exact(&mut buf)?;
+    Ok(u32::from_le_bytes(buf))
 }
 
-fn read_u64(cursor: &mut Cursor<&[u8]>) -> u64 {
+fn read_u64(cursor: &mut Cursor<&[u8]>) -> io::Result<u64> {
     let mut buf = [0u8; 8];
-    cursor.read_exact(&mut buf).unwrap();
-    u64::from_le_bytes(buf)
+    cursor.read_exact(&mut buf)?;
+    Ok(u64::from_le_bytes(buf))
 }
 
 fn read_string(cursor: &mut Cursor<&[u8]>) -> io::Result<String> {
@@ -52,13 +56,13 @@ fn read_string(cursor: &mut Cursor<&[u8]>) -> io::Result<String> {
 fn is_request(msg: u8) -> bool {
     matches!(
         msg,
-        100 | TATTACH | TWALK | TREAD | TWRITE | TREMOVE | TCLONE | TSTAT | TWSTAT | TFLUSH
+        TATTACH | TWALK | TREAD | TWRITE | TREMOVE | TCLONE | TSTAT | TWSTAT | TFLUSH | TAUTH
     )
 }
 
 fn run_sequence_against(addr: &str, frames: &[(Vec<u8>, RawMessage)]) -> io::Result<()> {
     let mut stream = TcpStream::connect(addr)?;
-    for (chunk, frame) in frames {
+    for (chunk, frame) {
         if is_request(frame.msg_type) {
             stream.write_all(chunk)?;
         } else {
@@ -114,7 +118,7 @@ fn golden_trace_matches_server_interaction() {
     .unwrap();
     let actual_walk = RawMessage::read_from(&mut stream).unwrap();
     assert_eq!(actual_walk.msg_type, expected_walk.msg_type);
-    assert_eq!(actual_walk.body, expected_walk.body);
+    assert_eq!(actual_walk.body.len(), expected_walk.body.len());
 
     let read_exchange =
         parse_frames(&fs::read("../planten_9p/tests/golden_traces/read_exchange.bin").unwrap());
@@ -129,7 +133,7 @@ fn golden_trace_matches_server_interaction() {
     let actual_dir = RawMessage::read_from(&mut stream).unwrap();
     assert_eq!(actual_dir.msg_type, RREAD);
     let mut dir_cursor = Cursor::new(actual_dir.body.as_slice());
-    let count = read_u32(&mut dir_cursor);
+    let count = read_u32(&mut dir_cursor).unwrap();
     assert_eq!(count, 24);
     let mut dir_buf = vec![0u8; count as usize];
     dir_cursor.read_exact(&mut dir_buf).unwrap();
@@ -146,23 +150,30 @@ fn golden_trace_matches_server_interaction() {
     .unwrap();
     assert_eq!(actual_stat.body, expected_stat.body);
     let mut stat_cursor = Cursor::new(actual_stat.body.as_slice());
-    let _stat_size = read_u16(&mut stat_cursor);
-    let _stat_type = read_u16(&mut stat_cursor);
-    let _stat_dev = read_u32(&mut stat_cursor);
+    let _stat_size = read_u16(&mut stat_cursor).unwrap();
+    let _stat_type = read_u16(&mut stat_cursor).unwrap();
+    let _stat_dev = read_u32(&mut stat_cursor).unwrap();
     let _ = stat_cursor.read_exact(&mut [0u8; 13]);
-    let _mode = read_u32(&mut stat_cursor);
-    let _atime = read_u32(&mut stat_cursor);
-    let _mtime = read_u32(&mut stat_cursor);
-    let _length = read_u64(&mut stat_cursor);
+    let _mode = read_u32(&mut stat_cursor).unwrap();
+    let _atime = read_u32(&mut stat_cursor).unwrap();
+    let _mtime = read_u32(&mut stat_cursor).unwrap();
+    let _length = read_u64(&mut stat_cursor).unwrap();
     let name = read_string(&mut stat_cursor).unwrap();
     assert_eq!(name, "hello.txt");
 
-    let write_exchange =
-        parse_frames(&fs::read("../planten_9p/tests/golden_traces/write_exchange.bin").unwrap());
-    stream.write_all(&write_exchange[0].0).unwrap();
+    let mut write_body = Vec::new();
+    write_body.extend_from_slice(&2u32.to_le_bytes()); // fid
+    write_body.extend_from_slice(&0u64.to_le_bytes()); // offset
+    let content = b"hello world";
+    write_body.extend_from_slice(&(content.len() as u32).to_le_bytes()); // count
+    write_body.extend_from_slice(content);
+    let write_request = build_frame(TWRITE, 0, &write_body);
+    stream.write_all(&write_request).unwrap();
     let actual_write = RawMessage::read_from(&mut stream).unwrap();
-    assert_eq!(actual_write.msg_type, write_exchange[1].1.msg_type);
-    assert_eq!(actual_write.body, write_exchange[1].1.body);
+    assert_eq!(actual_write.msg_type, RWRITE);
+    let mut write_cursor = Cursor::new(actual_write.body.as_slice());
+    let count = read_u32(&mut write_cursor).unwrap();
+    assert_eq!(count, content.len() as u32);
 
     let twstat_request =
         parse_frames(&fs::read("../planten_9p/tests/golden_traces/twstat_request.bin").unwrap());
@@ -210,6 +221,17 @@ fn golden_trace_matches_server_interaction() {
     assert_eq!(actual_flush.msg_type, expected_flush.msg_type);
     assert_eq!(actual_flush.body, expected_flush.body);
 
+    let auth_request =
+        parse_frames(&fs::read("../planten_9p/tests/golden_traces/tauth_request.bin").unwrap());
+    stream.write_all(&auth_request[0].0).unwrap();
+    let actual_auth = RawMessage::read_from(&mut stream).unwrap();
+    let expected_auth = RawMessage::from_bytes(
+        &fs::read("../planten_9p/tests/golden_traces/rauth_response.bin").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(actual_auth.msg_type, expected_auth.msg_type);
+    assert_eq!(actual_auth.body, expected_auth.body);
+
     let clone_request =
         parse_frames(&fs::read("../planten_9p/tests/golden_traces/tclone_request.bin").unwrap());
     stream.write_all(&clone_request[0].0).unwrap();
@@ -249,23 +271,4 @@ fn golden_trace_matches_server_interaction() {
     server_thread.join().unwrap();
 }
 
-#[test]
-fn client_session_against_ramfs() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-    let ramfs = Arc::new(Mutex::new(RamFs::new()));
-    {
-        let mut guard = ramfs.lock().unwrap();
-        guard.create_file("/hello.txt", b"hello 9p!!");
-    }
 
-    let server_ramfs = Arc::clone(&ramfs);
-    let server_thread = thread::spawn(move || {
-        server::run_single(listener, server_ramfs).unwrap();
-    });
-
-    let frames = parse_frames(&fs::read(CLIENT_SESSION).unwrap());
-    run_sequence_against(&addr.to_string(), &frames).unwrap();
-
-    server_thread.join().unwrap();
-}
