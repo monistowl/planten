@@ -1,21 +1,5 @@
-use planten_fs_core::FsServer;
+use planten_fs_core::{FsServer, Inode};
 use std::collections::HashMap;
-
-pub struct Inode {
-    pub name: String,
-    pub data: Vec<u8>,
-    pub children: HashMap<String, Inode>,
-}
-
-impl Inode {
-    pub fn new(name: &str) -> Self {
-        Inode {
-            name: name.to_string(),
-            data: Vec::new(),
-            children: HashMap::new(),
-        }
-    }
-}
 
 pub struct RamFs {
     root: Inode,
@@ -24,7 +8,7 @@ pub struct RamFs {
 impl RamFs {
     pub fn new() -> Self {
         RamFs {
-            root: Inode::new("/"),
+            root: Inode::new("/", 0o755 | 0x80000000, "user", "group"),
         }
     }
 
@@ -33,14 +17,14 @@ impl RamFs {
         let components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
         for (i, component) in components.iter().enumerate() {
             if i == components.len() - 1 {
-                let mut file = Inode::new(component);
+                let mut file = Inode::new(component, 0o644, "user", "group");
                 file.data = data.to_vec();
                 current.children.insert(component.to_string(), file);
             } else {
                 current = current
                     .children
                     .entry(component.to_string())
-                    .or_insert_with(|| Inode::new(component));
+                    .or_insert_with(|| Inode::new(component, 0o755 | 0x80000000, "user", "group"));
             }
         }
     }
@@ -82,12 +66,12 @@ impl RamFs {
                 current
                     .children
                     .entry(component.to_string())
-                    .or_insert_with(|| Inode::new(component));
+                    .or_insert_with(|| Inode::new(component, 0o755 | 0x80000000, "user", "group"));
             } else {
                 current = current
                     .children
                     .entry(component.to_string())
-                    .or_insert_with(|| Inode::new(component));
+                    .or_insert_with(|| Inode::new(component, 0o755 | 0x80000000, "user", "group"));
             }
         }
     }
@@ -146,11 +130,20 @@ impl FsServer for RamFs {
         None
     }
 
-    fn stat(&self, path: &str) -> Option<()> {
-        self.read_file(path).map(|_| ())
+    fn stat(&self, path: &str) -> Option<Inode> {
+        let mut current = &self.root;
+        let components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        for component in components {
+            if let Some(node) = current.children.get(component) {
+                current = node;
+            } else {
+                return None;
+            }
+        }
+        Some(current.clone())
     }
 
-    fn wstat(&mut self, _path: &str) -> Option<()> {
+    fn wstat(&mut self, _path: &str, _inode: Inode) -> Option<()> {
         Some(())
     }
 }

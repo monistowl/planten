@@ -175,13 +175,22 @@ fn handle_stat(
     };
 
     let guard = ramfs.lock().unwrap();
-    let stat = if let Some(data) = guard.read_file(path) {
-        build_stat(path, data.len() as u64, 0o644)
-    } else if guard.list_dir(path).is_some() {
-        build_stat(path, 0, 0o755 | 0x80000000) // DMDIR
-    } else {
-        return send_error(stream, tag, "file not found");
+    let inode = match guard.stat(path) {
+        Some(inode) => inode,
+        None => {
+            return send_error(stream, tag, "file not found");
+        }
     };
+
+    let stat = build_stat(
+        &inode.name,
+        inode.data.len() as u64,
+        inode.mode,
+        &inode.uid,
+        &inode.gid,
+        inode.atime,
+        inode.mtime,
+    );
 
     send_response(stream, RSTAT, tag, &stat)
 }
@@ -472,7 +481,15 @@ fn encode_qid(path: &str) -> [u8; 13] {
     qid
 }
 
-fn build_stat(name: &str, length: u64, mode: u32) -> Vec<u8> {
+fn build_stat(
+    name: &str,
+    length: u64,
+    mode: u32,
+    uid: &str,
+    gid: &str,
+    atime: u32,
+    mtime: u32,
+) -> Vec<u8> {
     let mut buf = Vec::new();
     let qid = encode_qid(name);
     let stat = vec![
@@ -480,13 +497,13 @@ fn build_stat(name: &str, length: u64, mode: u32) -> Vec<u8> {
         0u32.to_le_bytes().to_vec(), // dev
         qid.to_vec(),
         mode.to_le_bytes().to_vec(),
-        0u32.to_le_bytes().to_vec(), // atime
-        0u32.to_le_bytes().to_vec(), // mtime
+        atime.to_le_bytes().to_vec(),
+        mtime.to_le_bytes().to_vec(),
         length.to_le_bytes().to_vec(),
         encode_string_as_bytes(name),
-        encode_string_as_bytes("user"),
-        encode_string_as_bytes("group"),
-        encode_string_as_bytes("user"),
+        encode_string_as_bytes(uid),
+        encode_string_as_bytes(gid),
+        encode_string_as_bytes(uid), // muid
     ];
     let stat_bytes: Vec<u8> = stat.into_iter().flatten().collect();
     buf.extend_from_slice(&(stat_bytes.len() as u16).to_le_bytes());
