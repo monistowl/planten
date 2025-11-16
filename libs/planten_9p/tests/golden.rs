@@ -1,9 +1,12 @@
 use std::fs;
 use std::io::{Cursor, Read};
+use std::path::PathBuf;
 
 use planten_9p::RawMessage;
+use planten_9p::decode_stat;
 use planten_9p::messages::{
-    RATTACH, RCLONE, RERROR, ROPEN, RREAD, RSTAT, RVERSION, RWALK, RWRITE, TATTACH, TREAD, TVERSION, TWALK,
+    RATTACH, RCLONE, RERROR, ROPEN, RREAD, RSTAT, RVERSION, RWALK, RWRITE, TATTACH, TCLONE, TREAD,
+    TSTAT, TVERSION, TWALK,
 };
 
 fn read_u16(cursor: &mut Cursor<&[u8]>) -> u16 {
@@ -18,12 +21,32 @@ fn read_u32(cursor: &mut Cursor<&[u8]>) -> u32 {
     u32::from_le_bytes(buf)
 }
 
+fn repo_trace_path(file: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("repo root")
+        .join("tests")
+        .join("golden_traces")
+        .join(file)
+}
+
+fn read_trace_messages(file: &str) -> Vec<RawMessage> {
+    let bytes = fs::read(repo_trace_path(file)).unwrap();
+    let mut cursor = Cursor::new(bytes.as_slice());
+    let mut frames = Vec::new();
+    while (cursor.position() as usize) < bytes.len() {
+        frames.push(RawMessage::read_from(&mut cursor).unwrap());
+    }
+    frames
+}
+
 #[test]
 fn golden_version_response_parses() {
-    let bytes = fs::read("tests/golden_frames/version_response.bin").unwrap();
+    let bytes = fs::read(repo_trace_path("version_r.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, RVERSION);
-    assert_eq!(frame.tag, 0x1234);
+    assert_eq!(frame.tag, 0);
     assert_eq!(frame.size as usize, bytes.len());
 
     let mut cursor = Cursor::new(frame.body.as_slice());
@@ -38,10 +61,10 @@ fn golden_version_response_parses() {
 
 #[test]
 fn golden_walk_response_parses() {
-    let bytes = fs::read("tests/golden_frames/walk_response.bin").unwrap();
+    let bytes = fs::read(repo_trace_path("walk_response.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, RWALK);
-    assert_eq!(frame.tag, 0x3412);
+    assert_eq!(frame.tag, 0x0002);
     assert_eq!(frame.size as usize, bytes.len());
 
     let mut cursor = Cursor::new(frame.body.as_slice());
@@ -52,73 +75,72 @@ fn golden_walk_response_parses() {
     cursor.read_exact(&mut qid).unwrap();
     assert_eq!(qid[0], 0);
     assert_eq!(&qid[1..5], &[0, 0, 0, 0]);
-    assert_eq!(&qid[5..], &[0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]);
+    assert_eq!(&qid[5..], &[0x62, 0x3c, 0x92, 0xa9, 0xce, 0xc3, 0x4d, 0x3c]);
 }
 
 #[test]
 fn golden_open_response_parses() {
-    let bytes = fs::read("tests/golden_frames/ropen_response.bin").unwrap();
+    let bytes = fs::read(repo_trace_path("ropen_root_response.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, ROPEN);
-    assert_eq!(frame.tag, 0x1234);
+    assert_eq!(frame.tag, 0x0005);
     assert_eq!(frame.size as usize, bytes.len());
 
     let mut cursor = Cursor::new(frame.body.as_slice());
     let mut qid = [0u8; 13];
     cursor.read_exact(&mut qid).unwrap();
-    assert_eq!(qid[0], 0);
-    assert_eq!(&qid[5..], &[0, 0, 0, 0, 0, 0, 0, 1]);
+    assert_eq!(qid[0], 0x80);
     let iounit = read_u32(&mut cursor);
-    assert_eq!(iounit, 0x80);
+    assert_eq!(iounit, 0);
 }
 
 #[test]
 fn golden_read_response_parses() {
-    let bytes = fs::read("tests/golden_frames/rread_response.bin").unwrap();
+    let bytes = fs::read(repo_trace_path("read_r.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, RREAD);
-    assert_eq!(frame.tag, 0x5678);
+    assert_eq!(frame.tag, 0x0002);
     assert_eq!(frame.size as usize, bytes.len());
 
     let mut cursor = Cursor::new(frame.body.as_slice());
     let count = read_u32(&mut cursor);
-    assert_eq!(count, 11);
+    assert_eq!(count, 5);
     let mut payload = vec![0u8; count as usize];
     cursor.read_exact(&mut payload).unwrap();
-    assert_eq!(&payload, b"hello 9p!!");
+    assert_eq!(&payload, b"hello");
 }
 
 #[test]
 fn golden_error_response_parses() {
-    let bytes = fs::read("tests/golden_frames/rerror_response.bin").unwrap();
+    let bytes = fs::read(repo_trace_path("rerror_oob.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, RERROR);
-    assert_eq!(frame.tag, 0x2211);
+    assert_eq!(frame.tag, 0x0010);
     assert_eq!(frame.size as usize, bytes.len());
 
     let mut cursor = Cursor::new(frame.body.as_slice());
     let message_len = read_u16(&mut cursor) as usize;
     let mut buffer = vec![0u8; message_len];
     cursor.read_exact(&mut buffer).unwrap();
-    assert_eq!(&buffer, b"oops");
+    assert_eq!(&buffer, b"unknown fid");
 }
 
 #[test]
 fn golden_write_response_parses() {
-    let bytes = fs::read("tests/golden_frames/rwrite_response.bin").unwrap();
-    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    let frames = read_trace_messages("write_exchange.bin");
+    assert_eq!(frames.len(), 2);
+    let frame = &frames[1];
     assert_eq!(frame.msg_type, RWRITE);
-    assert_eq!(frame.tag, 0x3344);
-    assert_eq!(frame.size as usize, bytes.len());
+    assert_eq!(frame.tag, frames[0].tag);
 
     let mut cursor = Cursor::new(frame.body.as_slice());
     let count = read_u32(&mut cursor);
-    assert_eq!(count, 5);
+    assert_eq!(count, 11);
 }
 
 #[test]
 fn golden_handshake_trace_round_trips() {
-    let bytes = fs::read("tests/golden_traces/handshake.bin").unwrap();
+    let bytes = fs::read(repo_trace_path("handshake.bin")).unwrap();
     let mut cursor = Cursor::new(bytes.as_slice());
     let mut seen = Vec::new();
     while (cursor.position() as usize) < bytes.len() {
@@ -130,13 +152,13 @@ fn golden_handshake_trace_round_trips() {
 
 #[test]
 fn golden_clone_trace_parses() {
-    let bytes = fs::read("tests/golden_traces/tclone_request.bin").unwrap();
+    let bytes = fs::read(repo_trace_path("tclone_request.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, TCLONE);
     assert_eq!(frame.tag, 0x9999);
     assert_eq!(frame.size as usize, bytes.len());
 
-    let bytes = fs::read("tests/golden_traces/rclone_response.bin").unwrap();
+    let bytes = fs::read(repo_trace_path("rclone_response.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, RCLONE);
     assert_eq!(frame.tag, 0x9999);
@@ -144,54 +166,60 @@ fn golden_clone_trace_parses() {
 
 #[test]
 fn golden_twalk_error_parses() {
-    let bytes = fs::read("tests/golden_traces/twalk_error_request.bin").unwrap();
+    let bytes = fs::read(repo_trace_path("twalk_error_request.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, TWALK);
-    assert_eq!(frame.tag, 0xaadd);
+    assert_eq!(frame.tag, 0x000b);
 
-    let bytes = fs::read("tests/golden_traces/rerror_walk.bin").unwrap();
+    let bytes = fs::read(repo_trace_path("rerror_walk.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, RERROR);
-    assert_eq!(frame.tag, 0xaadd);
+    assert_eq!(frame.tag, 0x000b);
 }
 
 #[test]
 fn golden_tread_oob_error_parses() {
-    let bytes = fs::read("tests/golden_traces/tread_oob_request.bin").unwrap();
+    let bytes = fs::read(repo_trace_path("tread_oob_request.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, TREAD);
-    assert_eq!(frame.tag, 0x0202);
+    assert_eq!(frame.tag, 0x0010);
 
-    let bytes = fs::read("tests/golden_traces/rerror_oob.bin").unwrap();
+    let bytes = fs::read(repo_trace_path("rerror_oob.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, RERROR);
-    assert_eq!(frame.tag, 0x0202);
+    assert_eq!(frame.tag, 0x0010);
 }
 
 #[test]
 fn golden_stat_response_parses() {
-    let bytes = fs::read("tests/golden_frames/rstat_response.bin").unwrap();
+    let bytes = fs::read(repo_trace_path("rstat_response.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, RSTAT);
-    assert_eq!(frame.tag, 0x4321);
+    assert_eq!(frame.tag, 0x0007);
     assert_eq!(frame.size as usize, bytes.len());
 
     let mut cursor = Cursor::new(frame.body.as_slice());
-    let stat_size = read_u16(&mut cursor);
-    let mut stat_buf = vec![0u8; stat_size as usize];
-    cursor.read_exact(&mut stat_buf).unwrap();
-
-    let mut stat_cursor = Cursor::new(stat_buf.as_slice());
-    let _type = read_u16(&mut stat_cursor);
-    let _dev = read_u32(&mut stat_cursor);
-    let mut qid = [0u8; 13];
-    stat_cursor.read_exact(&mut qid).unwrap();
-    let mode = read_u32(&mut stat_cursor);
-    let _atime = read_u32(&mut stat_cursor);
-    let _mtime = read_u32(&mut stat_cursor);
-    let length = u64::from_le_bytes(stat_buf[30..38].try_into().unwrap());
-    
-    assert_eq!(mode, 0o755 | 0x80000000);
-    assert_eq!(length, 0);
+    let stat = decode_stat(&mut cursor).unwrap();
+    assert_eq!(stat.name, "hello.txt");
+    assert_eq!(stat.mode & 0o777, 0o644);
+    assert_eq!(stat.length, 10);
 }
 
+#[test]
+fn golden_tstat_error_trace_matches() {
+    let bytes = fs::read(repo_trace_path("tstat_error_request.bin")).unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, TSTAT);
+    assert_eq!(frame.tag, 0x000f);
+
+    let bytes = fs::read(repo_trace_path("rerror_tstat.bin")).unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, RERROR);
+    assert_eq!(frame.tag, 0x000f);
+
+    let mut cursor = Cursor::new(frame.body.as_slice());
+    let message_len = read_u16(&mut cursor) as usize;
+    let mut buffer = vec![0u8; message_len];
+    cursor.read_exact(&mut buffer).unwrap();
+    assert_eq!(&buffer, b"unknown fid");
+}

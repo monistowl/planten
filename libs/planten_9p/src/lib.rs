@@ -6,7 +6,7 @@ use std::net::TcpStream;
 use crate::messages::*;
 
 /// Raw 9P frame.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RawMessage {
     pub size: u32,
     pub msg_type: u8,
@@ -167,6 +167,28 @@ fn ensure_msg_type(response: &RawMessage, expected: u8) -> io::Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Qid {
+    pub qtype: u8,
+    pub version: u32,
+    pub path: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stat {
+    pub type_: u16,
+    pub dev: u32,
+    pub qid: Qid,
+    pub mode: u32,
+    pub atime: u32,
+    pub mtime: u32,
+    pub length: u64,
+    pub name: String,
+    pub uid: String,
+    pub gid: String,
+    pub muid: String,
+}
+
 pub fn build_frame(msg_type: u8, tag: u16, body: &[u8]) -> Vec<u8> {
     let size = 7 + body.len() as u32;
     let mut buffer = Vec::with_capacity(size as usize);
@@ -177,15 +199,23 @@ pub fn build_frame(msg_type: u8, tag: u16, body: &[u8]) -> Vec<u8> {
     buffer
 }
 
-fn encode_version_body(msize: u32, version: &str) -> Vec<u8> {
+pub fn encode_version_body(msize: u32, version: &str) -> Vec<u8> {
     let mut buf = Vec::with_capacity(4 + 2 + version.len());
     buf.extend_from_slice(&msize.to_le_bytes());
-    buf.extend_from_slice(&u16::try_from(version.len()).unwrap_or(0).to_le_bytes());
+    buf.extend_from_slice(&(version.len() as u16).to_le_bytes());
     buf.extend_from_slice(version.as_bytes());
     buf
 }
 
-fn encode_attach_body(fid: u32, afid: Option<u32>, uname: &str, aname: &str) -> Vec<u8> {
+pub fn encode_auth_body(fid: u32, uname: &str, aname: &str) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&fid.to_le_bytes());
+    buf.extend_from_slice(&encode_string(uname));
+    buf.extend_from_slice(&encode_string(aname));
+    buf
+}
+
+pub fn encode_attach_body(fid: u32, afid: Option<u32>, uname: &str, aname: &str) -> Vec<u8> {
     let mut buf = Vec::new();
     buf.extend_from_slice(&fid.to_le_bytes());
     buf.extend_from_slice(&afid.unwrap_or(0).to_le_bytes());
@@ -194,7 +224,7 @@ fn encode_attach_body(fid: u32, afid: Option<u32>, uname: &str, aname: &str) -> 
     buf
 }
 
-fn encode_walk_body(fid: u32, newfid: u32, names: &[&str]) -> Vec<u8> {
+pub fn encode_walk_body(fid: u32, newfid: u32, names: &[&str]) -> Vec<u8> {
     let mut buf = Vec::new();
     buf.extend_from_slice(&fid.to_le_bytes());
     buf.extend_from_slice(&newfid.to_le_bytes());
@@ -205,14 +235,14 @@ fn encode_walk_body(fid: u32, newfid: u32, names: &[&str]) -> Vec<u8> {
     buf
 }
 
-fn encode_open_body(fid: u32, mode: u8) -> Vec<u8> {
+pub fn encode_open_body(fid: u32, mode: u8) -> Vec<u8> {
     let mut buf = Vec::new();
     buf.extend_from_slice(&fid.to_le_bytes());
     buf.push(mode);
     buf
 }
 
-fn encode_read_body(fid: u32, offset: u64, count: u32) -> Vec<u8> {
+pub fn encode_read_body(fid: u32, offset: u64, count: u32) -> Vec<u8> {
     let mut buf = Vec::new();
     buf.extend_from_slice(&fid.to_le_bytes());
     buf.extend_from_slice(&offset.to_le_bytes());
@@ -220,50 +250,115 @@ fn encode_read_body(fid: u32, offset: u64, count: u32) -> Vec<u8> {
     buf
 }
 
-fn encode_clunk_body(fid: u32) -> Vec<u8> {
+pub fn encode_write_body(fid: u32, offset: u64, data: &[u8]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&fid.to_le_bytes());
+    buf.extend_from_slice(&offset.to_le_bytes());
+    buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    buf.extend_from_slice(data);
+    buf
+}
+
+pub fn encode_clunk_body(fid: u32) -> Vec<u8> {
     fid.to_le_bytes().to_vec()
 }
 
-fn encode_string(value: &str) -> Vec<u8> {
+pub fn encode_create_body(fid: u32, name: &str, perm: u32, mode: u8) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&fid.to_le_bytes());
+    buf.extend_from_slice(&encode_string(name));
+    buf.extend_from_slice(&perm.to_le_bytes());
+    buf.push(mode);
+    buf
+}
+
+pub fn encode_remove_body(fid: u32) -> Vec<u8> {
+    fid.to_le_bytes().to_vec()
+}
+
+pub fn encode_stat_body(fid: u32) -> Vec<u8> {
+    fid.to_le_bytes().to_vec()
+}
+
+pub fn encode_wstat_body(fid: u32, stat: &Stat) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&fid.to_le_bytes());
+    buf.extend_from_slice(&encode_stat_payload(stat));
+    buf
+}
+
+pub fn encode_clone_body(fid: u32, newfid: u32) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&fid.to_le_bytes());
+    buf.extend_from_slice(&newfid.to_le_bytes());
+    buf
+}
+
+pub fn encode_flush_body(oldtag: u16) -> Vec<u8> {
+    oldtag.to_le_bytes().to_vec()
+}
+
+pub fn encode_stat_payload(stat: &Stat) -> Vec<u8> {
+    let mut stat_buf = Vec::new();
+    stat_buf.extend_from_slice(&stat.type_.to_le_bytes());
+    stat_buf.extend_from_slice(&stat.dev.to_le_bytes());
+    stat_buf.extend_from_slice(&encode_qid_bytes(&stat.qid));
+    stat_buf.extend_from_slice(&stat.mode.to_le_bytes());
+    stat_buf.extend_from_slice(&stat.atime.to_le_bytes());
+    stat_buf.extend_from_slice(&stat.mtime.to_le_bytes());
+    stat_buf.extend_from_slice(&stat.length.to_le_bytes());
+    stat_buf.extend_from_slice(&encode_string(&stat.name));
+    stat_buf.extend_from_slice(&encode_string(&stat.uid));
+    stat_buf.extend_from_slice(&encode_string(&stat.gid));
+    stat_buf.extend_from_slice(&encode_string(&stat.muid));
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&(stat_buf.len() as u16).to_le_bytes());
+    payload.extend_from_slice(&stat_buf);
+    payload
+}
+
+pub fn encode_string(value: &str) -> Vec<u8> {
     let mut buf = Vec::new();
     buf.extend_from_slice(&(value.len() as u16).to_le_bytes());
     buf.extend_from_slice(value.as_bytes());
     buf
 }
 
-fn decode_string(cursor: &mut Cursor<&[u8]>) -> io::Result<String> {
+pub fn encode_qid_bytes(qid: &Qid) -> [u8; 13] {
+    let mut buf = [0u8; 13];
+    buf[0] = qid.qtype;
+    buf[1..5].copy_from_slice(&qid.version.to_le_bytes());
+    buf[5..13].copy_from_slice(&qid.path.to_le_bytes());
+    buf
+}
+
+pub fn decode_string(cursor: &mut Cursor<&[u8]>) -> io::Result<String> {
     let len = decode_u16(cursor)? as usize;
     let mut buffer = vec![0u8; len];
     cursor.read_exact(&mut buffer)?;
-    match String::from_utf8(buffer) {
-        Ok(s) => Ok(s),
-        Err(_) => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "invalid UTF-8 string",
-        )),
-    }
+    String::from_utf8(buffer)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid UTF-8 string"))
 }
 
-fn decode_u16(cursor: &mut Cursor<&[u8]>) -> io::Result<u16> {
+pub fn decode_u16(cursor: &mut Cursor<&[u8]>) -> io::Result<u16> {
     let mut buf = [0u8; 2];
     cursor.read_exact(&mut buf)?;
     Ok(u16::from_le_bytes(buf))
 }
 
-fn decode_u32(cursor: &mut Cursor<&[u8]>) -> io::Result<u32> {
+pub fn decode_u32(cursor: &mut Cursor<&[u8]>) -> io::Result<u32> {
     let mut buf = [0u8; 4];
     cursor.read_exact(&mut buf)?;
     Ok(u32::from_le_bytes(buf))
 }
 
-#[derive(Debug)]
-struct Qid {
-    _qtype: u8,
-    _version: u32,
-    _path: u64,
+pub fn decode_u64(cursor: &mut Cursor<&[u8]>) -> io::Result<u64> {
+    let mut buf = [0u8; 8];
+    cursor.read_exact(&mut buf)?;
+    Ok(u64::from_le_bytes(buf))
 }
 
-fn decode_qid(cursor: &mut Cursor<&[u8]>) -> io::Result<Qid> {
+pub fn decode_qid(cursor: &mut Cursor<&[u8]>) -> io::Result<Qid> {
     let mut qid_buf = [0u8; 13];
     cursor.read_exact(&mut qid_buf)?;
     let qtype = qid_buf[0];
@@ -279,9 +374,40 @@ fn decode_qid(cursor: &mut Cursor<&[u8]>) -> io::Result<Qid> {
         qid_buf[12],
     ]);
     Ok(Qid {
-        _qtype: qtype,
-        _version: version,
-        _path: path,
+        qtype,
+        version,
+        path,
+    })
+}
+
+pub fn decode_stat(cursor: &mut Cursor<&[u8]>) -> io::Result<Stat> {
+    let stat_size = decode_u16(cursor)? as usize;
+    let mut buffer = vec![0u8; stat_size];
+    cursor.read_exact(&mut buffer)?;
+    let mut inner = Cursor::new(buffer.as_slice());
+    let type_ = decode_u16(&mut inner)?;
+    let dev = decode_u32(&mut inner)?;
+    let qid = decode_qid(&mut inner)?;
+    let mode = decode_u32(&mut inner)?;
+    let atime = decode_u32(&mut inner)?;
+    let mtime = decode_u32(&mut inner)?;
+    let length = decode_u64(&mut inner)?;
+    let name = decode_string(&mut inner)?;
+    let uid = decode_string(&mut inner)?;
+    let gid = decode_string(&mut inner)?;
+    let muid = decode_string(&mut inner)?;
+    Ok(Stat {
+        type_,
+        dev,
+        qid,
+        mode,
+        atime,
+        mtime,
+        length,
+        name,
+        uid,
+        gid,
+        muid,
     })
 }
 
@@ -296,7 +422,7 @@ mod tests {
         let msg = RawMessage::from_bytes(&frame).expect("parsable message");
         assert_eq!(msg.msg_type, TVERSION);
         assert_eq!(msg.tag, 7);
-        let mut cursor = Cursor::new(&msg.body);
+        let mut cursor = Cursor::new(msg.body.as_slice());
         assert_eq!(decode_u32(&mut cursor).unwrap(), 8192);
         assert_eq!(decode_string(&mut cursor).unwrap(), "9P2000");
     }
@@ -305,7 +431,7 @@ mod tests {
     fn encode_and_decode_string() {
         let value = "hello";
         let encoded = encode_string(value);
-        let mut cursor = Cursor::new(&encoded);
+        let mut cursor = Cursor::new(encoded.as_slice());
         assert_eq!(decode_string(&mut cursor).unwrap(), "hello");
     }
 
@@ -318,10 +444,10 @@ mod tests {
         buf.extend_from_slice(&0u64.to_le_bytes());
         let frame = build_frame(RWALK, 1, &buf);
         let msg = RawMessage::from_bytes(&frame).unwrap();
-        let mut cursor = Cursor::new(&msg.body);
+        let mut cursor = Cursor::new(msg.body.as_slice());
         let count = decode_u16(&mut cursor).unwrap();
         assert_eq!(count, 1);
         let qid = decode_qid(&mut cursor).unwrap();
-        assert_eq!(qid._qtype, 0u8);
+        assert_eq!(qid.qtype, 0u8);
     }
 }
