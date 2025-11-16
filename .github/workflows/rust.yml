@@ -10,13 +10,27 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
+  build_and_test:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v3
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+
+    - name: Install nightly toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: nightly
+        override: true
+        components: rust-src, llvm-tools-preview
+
+    - name: Install bootimage
+      run: cargo install bootimage
+
+    - name: Build all workspace members
+      run: cargo build --workspace --verbose
+
+    - name: Test all workspace members
+      run: cargo test --workspace --verbose
+
+    - name: Build kernel
+      run: cargo bootimage
+      working-directory: kernel/planten_kernel
