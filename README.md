@@ -20,6 +20,7 @@ Plan 9/QEMU harness
 - See `docs/plan9-qemu.md` for the new `tools/plan9-qemu/{setup,run}.sh` helpers that download a known 9front ISO, boot it under QEMU, and expose forwarded ports (host 1564→guest 564, 1567→567, etc.) so we can validate planten 9P clients against a real Plan 9 guest.
 - The new `tools/plan9-qemu/ci-runner.sh` script wraps `run.sh`, waits for the guest’s 9P port, runs `cargo run -p plan9_qemu_client --quiet`, and cleans up the VM; use it as the first gate in any Plan 9 QEMU-based CI job.
 - Pass `PLAN9_DISTRO=plan9` (or override `PLAN9_ISO_URL`/`PLAN9_ISO_SHA256`) if you’d rather test against vanilla Plan 9 instead of 9front.
+- Run `tools/plan9-qemu/apply-ns.sh` after generating `~/.planten/ns.json`; it shares the namespace JSON into the guest so you can replay it via `10_ns`/`nsctl` inside the actual 9front instance.
 
 Namespace state is now serialized to `~/.planten/ns.json` (with `/srv/planten/ns.json` as a fallback when `$HOME` isn’t available), so each `10_ns`, `bind`, `mount`, and `nsctl` invocation reads/writes the same ordered mount list.
 

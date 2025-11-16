@@ -55,3 +55,7 @@ This guide implements the plan captured in bd issue `planten-bsd`: we source a r
 - Update `PLAN9_ISO_URL` / `PLAN9_ISO_SHA256` when a new 9front release lands; rerun `setup.sh` to refresh `plan9.qcow2`.  
 - Extend this doc with instructions on how to mount the host `planten` repo inside the guest (e.g., `mount -t 9p hostshare /n/planten`) and how to script 9P command sequences captured from `tools/capture_golden`.  
 - Track future automation/CI gating work in bd issue `planten-bsd` so changes stay linked to the original plan.
+
+## Applying saved namespaces
+
+- `tools/plan9-qemu/apply-ns.sh` copies `~/.planten/ns.json` (or the path supplied via `PLAN9_NS_FILE`) into a shared directory, boots the QEMU guest with that directory exposed via `virtfs`, and prints the commands you should run inside the guest. Mount the share (`mount -t 9p hostshare /n/host`), copy the JSON (`cp /n/host/ns.json /tmp/ns.json`), then run `10_ns`/`bind`/`mount` inside the guest to replay the recorded mounts. This is the bridge between the namespace helpers we just tested and a real 9front system.
