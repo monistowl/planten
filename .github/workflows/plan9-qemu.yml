@@ -1,0 +1,39 @@
+name: Plan 9 QEMU Gate
+
+on:
+  workflow_dispatch:
+
+jobs:
+  plan9-qemu:
+    name: Plan 9 Guest Readiness
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Plan 9 artifacts
+        uses: actions/cache@v4
+        with:
+          path: tools/plan9-qemu/.plan9
+          key: plan9-qemu-${{ runner.os }}-9front-10931
+
+      - name: Install qemu + python3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 python3
+
+      - name: Setup Plan 9 image
+        run: |
+          tools/plan9-qemu/setup.sh
+
+      - name: Run Plan 9 handshake runner
+        env:
+          # override here if you want vanilla Plan 9 instead of 9front
+          PLAN9_DISTRO: 9front
+        run: |
+          tools/plan9-qemu/ci-runner.sh
+
+      - name: Run rust checks
+        run: |
+          cargo check --workspace

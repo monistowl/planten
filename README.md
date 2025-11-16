@@ -15,6 +15,12 @@ Usage notes
 - Use `cargo run -p planten_coreutils --bin mount -- /tmp/fs /tmp/one /tmp/two` to add union mounts, or `cargo run -p planten_coreutils --bin bind -- /tmp/fs /tmp/one` to create simple binds.
 - Start the RAMFS 9P service with `cargo run -p planten_fs_ramfs --bin server`; then run `10_ns -p9 /mnt/ramfs 127.0.0.1:5640 /` to probe and mount it (on a Linux host).
 
+Plan 9/QEMU harness
+--------------------
+- See `docs/plan9-qemu.md` for the new `tools/plan9-qemu/{setup,run}.sh` helpers that download a known 9front ISO, boot it under QEMU, and expose forwarded ports (host 1564→guest 564, 1567→567, etc.) so we can validate planten 9P clients against a real Plan 9 guest.
+- The new `tools/plan9-qemu/ci-runner.sh` script wraps `run.sh`, waits for the guest’s 9P port, runs `cargo run -p plan9_qemu_client --quiet`, and cleans up the VM; use it as the first gate in any Plan 9 QEMU-based CI job.
+- Pass `PLAN9_DISTRO=plan9` (or override `PLAN9_ISO_URL`/`PLAN9_ISO_SHA256`) if you’d rather test against vanilla Plan 9 instead of 9front.
+
 Namespace state is now serialized to `~/.planten/ns.json` (with `/srv/planten/ns.json` as a fallback when `$HOME` isn’t available), so each `10_ns`, `bind`, `mount`, and `nsctl` invocation reads/writes the same ordered mount list.
 
 Linting
