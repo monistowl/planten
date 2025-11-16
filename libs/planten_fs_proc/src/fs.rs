@@ -1,7 +1,7 @@
 use planten_fs_core::{FsServer, Inode};
 use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
-use sysinfo::{Pid, ProcessExt, System, SystemExt};
+use sysinfo::{Pid, System};
 
 const PROC_FILES: [&str; 2] = ["cmdline", "status"];
 

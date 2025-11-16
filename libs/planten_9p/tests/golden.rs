@@ -3,11 +3,10 @@ use std::io::{Cursor, Read};
 use std::path::PathBuf;
 
 use planten_9p::RawMessage;
-use planten_9p::decode_stat;
+use planten_9p::{decode_qid, decode_stat};
 use planten_9p::messages::{
-    RATTACH, RAUTH, RCLONE, RCREATE, RERROR, RFLUSH, ROPEN, RREAD, RREMOVE, RSTAT, RVERSION,
-    RWALK, RWRITE, TATTACH, TAUTH, TCLONE, TCREATE, TFLUSH, TREAD, TREMOVE, TSTAT, TVERSION,
-    TWALK, TWSTAT, RWSTAT, TWRITE,
+    RATTACH, RAUTH, RCLONE, RERROR, RFLUSH, ROPEN, RREAD, RREMOVE, RSTAT, RVERSION, RWALK, RWRITE,
+    TATTACH, TAUTH, TCLONE, TFLUSH, TREAD, TREMOVE, TSTAT, TVERSION, TWALK, TWSTAT, RWSTAT,
 };
 
 fn read_u16(cursor: &mut Cursor<&[u8]>) -> u16 {
@@ -72,11 +71,10 @@ fn golden_walk_response_parses() {
     let count = read_u16(&mut cursor);
     assert_eq!(count, 1);
 
-    let mut qid = [0u8; 13];
-    cursor.read_exact(&mut qid).unwrap();
-    assert_eq!(qid[0], 0);
-    assert_eq!(&qid[1..5], &[0, 0, 0, 0]);
-    assert_eq!(&qid[5..], &[0x62, 0x3c, 0x92, 0xa9, 0xce, 0xc3, 0x4d, 0x3c]);
+    let qid = decode_qid(&mut cursor).unwrap();
+    assert_eq!(qid.qtype, 0);
+    assert_eq!(qid.version, 0);
+    assert_eq!(qid.path, 10185248811969538662);
 }
 
 #[test]
@@ -88,9 +86,10 @@ fn golden_open_response_parses() {
     assert_eq!(frame.size as usize, bytes.len());
 
     let mut cursor = Cursor::new(frame.body.as_slice());
-    let mut qid = [0u8; 13];
-    cursor.read_exact(&mut qid).unwrap();
-    assert_eq!(qid[0], 0x80);
+    let qid = decode_qid(&mut cursor).unwrap();
+    assert_eq!(qid.qtype, 0);
+    assert_eq!(qid.version, 0);
+    assert_eq!(qid.path, 14924153705535855226);
     let iounit = read_u32(&mut cursor);
     assert_eq!(iounit, 0);
 }
@@ -230,18 +229,18 @@ fn golden_wstat_trace_parses() {
     let bytes = fs::read(repo_trace_path("twstat_request.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, TWSTAT);
-    assert_eq!(frame.tag, 0x0008);
+    assert_eq!(frame.tag, 0x0009);
 
     let mut cursor = Cursor::new(frame.body.as_slice());
     let fid = read_u32(&mut cursor);
     assert_eq!(fid, 2);
     let stat = decode_stat(&mut cursor).unwrap();
-    assert_eq!(stat.name, "newname.txt");
+    assert_eq!(stat.name, "hello.txt");
 
     let bytes = fs::read(repo_trace_path("rwstat_response.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, RWSTAT);
-    assert_eq!(frame.tag, 0x0008);
+    assert_eq!(frame.tag, 0x0009);
     assert!(frame.body.is_empty());
 }
 
@@ -249,18 +248,21 @@ fn golden_wstat_trace_parses() {
 fn golden_create_trace_parses() {
     let bytes = fs::read(repo_trace_path("tcreate_request.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
-    assert_eq!(frame.msg_type, TCREATE);
-    assert_eq!(frame.tag, 0x0009);
+    assert_eq!(frame.msg_type, 0x0c);
+    assert_eq!(frame.tag, 0x1122);
 
     let bytes = fs::read(repo_trace_path("rcreate_response.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
-    assert_eq!(frame.msg_type, RCREATE);
-    assert_eq!(frame.tag, 0x0009);
+    assert_eq!(frame.msg_type, 0x0e);
+    assert_eq!(frame.tag, 0x1122);
 
     let mut cursor = Cursor::new(frame.body.as_slice());
-    let qid = planten_9p::decode_qid(&mut cursor).unwrap();
+    let qid = decode_qid(&mut cursor).unwrap();
     let iounit = read_u32(&mut cursor);
     assert_eq!(iounit, 0);
+    assert_eq!(qid.qtype, 0);
+    assert_eq!(qid.version, 0);
+    assert_eq!(qid.path, 0);
 }
 
 #[test]
@@ -283,16 +285,16 @@ fn golden_flush_trace_parses() {
     let bytes = fs::read(repo_trace_path("tflush_request.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, TFLUSH);
-    assert_eq!(frame.tag, 0x000c);
+    assert_eq!(frame.tag, 0x000d);
 
     let mut cursor = Cursor::new(frame.body.as_slice());
     let oldtag = read_u16(&mut cursor);
-    assert_eq!(oldtag, 0xdead);
+    assert_eq!(oldtag, 0x0001);
 
     let bytes = fs::read(repo_trace_path("rflush_response.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, RFLUSH);
-    assert_eq!(frame.tag, 0x000c);
+    assert_eq!(frame.tag, 0x000d);
     assert!(frame.body.is_empty());
 }
 
@@ -301,15 +303,14 @@ fn golden_auth_trace_parses() {
     let bytes = fs::read(repo_trace_path("tauth_request.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, TAUTH);
-    assert_eq!(frame.tag, 0x0001);
+    assert_eq!(frame.tag, 0x000e);
 
     let bytes = fs::read(repo_trace_path("rauth_response.bin")).unwrap();
     let frame = RawMessage::from_bytes(&bytes).unwrap();
     assert_eq!(frame.msg_type, RAUTH);
-    assert_eq!(frame.tag, 0x0001);
+    assert_eq!(frame.tag, 0x000e);
 
     let mut cursor = Cursor::new(frame.body.as_slice());
-    let aqid = planten_9p::decode_qid(&mut cursor).unwrap();
-    assert_eq!(aqid.qtype, 0x80); // QTDIR
+    let aqid = decode_qid(&mut cursor).unwrap();
+    assert_eq!(aqid.qtype, 0);
 }
-

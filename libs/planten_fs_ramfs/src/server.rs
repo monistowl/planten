@@ -6,7 +6,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use planten_9p::{build_frame, messages::*, RawMessage, Stat};
+use planten_9p::{build_frame, messages::*, RawMessage};
 use planten_fs_core::FsServer;
 
 use crate::RamFs;

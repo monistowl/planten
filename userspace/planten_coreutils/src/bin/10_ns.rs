@@ -170,9 +170,9 @@ fn main() {
                                 if let Err(e) = mount(
                                     Some(path.as_str()),
                                     new.as_str(),
-                                    None,
+                                    None::<&str>,
                                     MsFlags::MS_BIND,
-                                    None,
+                                    None::<&str>,
                                 ) {
                                     eprintln!("Failed to bind mount {} to {}: {}", path, new, e);
                                 }
@@ -191,9 +191,9 @@ fn main() {
                                     if let Err(e) = mount(
                                         Some(path.as_str()),
                                         target.to_str().unwrap(),
-                                        None,
+                                        None::<&str>,
                                         MsFlags::MS_BIND,
-                                        None,
+                                        None::<&str>,
                                     ) {
                                         eprintln!(
                                             "Failed to bind mount {} to {:?}: {}",
@@ -204,9 +204,9 @@ fn main() {
                                 if let Err(e) = mount(
                                     Some(tmp_dir.path().to_str().unwrap()),
                                     new.as_str(),
-                                    None,
+                                    None::<&str>,
                                     MsFlags::MS_BIND,
-                                    None,
+                                    None::<&str>,
                                 ) {
                                     eprintln!(
                                         "Failed to bind mount {:?} to {}: {}",
@@ -217,11 +217,17 @@ fn main() {
                                 }
                             }
                             MountPlan::P9 { addr, path } => {
-                                if let Err(err) = probe_remote_share(addr, path) {
+                                if let Err(err) =
+                                    probe_remote_share(addr.as_str(), path.as_str())
+                                {
                                     eprintln!("Failed to probe 9P {}@{}: {}", path, addr, err);
                                     continue;
                                 }
-                                if let Err(e) = mount_9p_target(new, addr, path) {
+                                if let Err(e) = mount_9p_target(
+                                    new.as_str(),
+                                    addr.as_str(),
+                                    path.as_str(),
+                                ) {
                                     eprintln!(
                                         "Failed to mount 9P {}@{} onto {}: {}",
                                         path, addr, new, e

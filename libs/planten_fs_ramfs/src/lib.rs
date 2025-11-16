@@ -33,6 +33,7 @@ impl RamFs {
             current = current.children.get_mut(*part)?;
         }
 
+        let filename = *filename;
         let mut inode = current.children.get(filename)?.clone();
 
         if stat.mode != !0u32 {
@@ -48,13 +49,13 @@ impl RamFs {
             inode.gid = stat.gid.clone();
         }
 
-        if !stat.name.is_empty() && stat.name != *filename {
+        if !stat.name.is_empty() && stat.name != filename {
             // rename
             if current.children.contains_key(&stat.name) {
                 return None; // exists
             }
             inode.name = stat.name.clone();
-            current.children.remove(*filename);
+            current.children.remove(filename);
             current.children.insert(inode.name.clone(), inode);
         } else {
             *current.children.get_mut(filename).unwrap() = inode;
@@ -146,12 +147,13 @@ impl FsServer for RamFs {
         let mut current = &mut self.root;
         let components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
         let (filename, path_parts) = components.split_last()?;
+        let filename = *filename;
 
         for part in path_parts {
             current = current.children.get_mut(*part)?;
         }
 
-        let node = current.children.get_mut(*filename)?;
+        let node = current.children.get_mut(filename)?;
         let start = offset as usize;
         let end = start + data.len();
         if end > node.data.len() {
