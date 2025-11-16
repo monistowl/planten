@@ -62,7 +62,11 @@ fn session_frames() -> Vec<(Vec<u8>, RawMessage)> {
         "topen_root_request.bin",
         "ropen_root_response.bin",
     );
-    push_pair(&mut frames, "tread_dir_request.bin", "dir_read_response.bin");
+    push_pair(
+        &mut frames,
+        "tread_dir_request.bin",
+        "dir_read_response.bin",
+    );
     push_pair(&mut frames, "tstat_request.bin", "rstat_response.bin");
     frames.extend(load_frames("write_exchange.bin"));
     push_pair(&mut frames, "twstat_request.bin", "rwstat_response.bin");

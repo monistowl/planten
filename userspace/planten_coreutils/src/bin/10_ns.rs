@@ -5,13 +5,14 @@ use nix::sched::{CloneFlags, unshare};
 use nix::unistd::{ForkResult, execvp, fork};
 #[cfg(target_os = "linux")]
 use planten_9p::P9Client;
-use planten_ns::{Mount, Namespace};
+#[cfg(target_os = "linux")]
+use planten_ns::MountPlan;
+use planten_ns::Namespace;
 use std::collections::HashMap;
 use std::env;
 use std::ffi::CString;
 #[cfg(target_os = "linux")]
 use std::fs;
-use std::fs::File;
 use std::io::{self, Write};
 #[cfg(target_os = "linux")]
 use std::path::Path;
@@ -21,7 +22,16 @@ use tempfile::tempdir;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let mut ns = Namespace::new();
+    let mut ns = match Namespace::load_from_storage() {
+        Ok(namespace) => namespace,
+        Err(err) => {
+            eprintln!(
+                "Failed to load namespace state; starting with an empty namespace: {}",
+                err
+            );
+            Namespace::new()
+        }
+    };
 
     let mut i = 1;
     while i < args.len() {
@@ -56,10 +66,8 @@ fn main() {
         }
     }
 
-    if let Err(e) = File::create("/tmp/ns.json")
-        .and_then(|mut file| file.write_all(serde_json::to_string_pretty(&ns).unwrap().as_bytes()))
-    {
-        eprintln!("Failed to write namespace file: {}", e);
+    if let Err(e) = ns.save_to_storage() {
+        eprintln!("Failed to persist namespace state: {}", e);
     }
 
     let cmd_args = &args[i..];
@@ -83,13 +91,7 @@ fn main() {
             if old.len() == 1 {
                 ns.bind(new, old[0]);
             } else {
-                let mut union_mount = Mount::Union { paths: vec![] };
-                if let Mount::Union { paths } = &mut union_mount {
-                    for path in old {
-                        paths.push(path.to_string());
-                    }
-                }
-                ns.add_mount(new, union_mount);
+                ns.union_multi(new, old);
             }
         });
         builtins.insert("nsctl".to_string(), |_, ns| {
@@ -119,10 +121,8 @@ fn main() {
 
             if let Some(builtin) = builtins.get(command) {
                 builtin(args, &mut ns);
-                if let Err(e) = File::create("/tmp/ns.json").and_then(|mut file| {
-                    file.write_all(serde_json::to_string_pretty(&ns).unwrap().as_bytes())
-                }) {
-                    eprintln!("Failed to write namespace file: {}", e);
+                if let Err(e) = ns.save_to_storage() {
+                    eprintln!("Failed to persist namespace state: {}", e);
                 }
             } else {
                 let mut cmd = Command::new(command);
@@ -162,11 +162,11 @@ fn main() {
                 {
                     eprintln!("Skipping namespace isolation: not available on this platform");
                 }
-                for (new, old) in ns.mounts() {
+                for (new, mount_point) in ns.mount_plan() {
                     #[cfg(target_os = "linux")]
                     {
-                        match old {
-                            Mount::Bind { path } => {
+                        match mount_point {
+                            MountPlan::Bind { path } => {
                                 if let Err(e) = mount(
                                     Some(path.as_str()),
                                     new.as_str(),
@@ -177,7 +177,7 @@ fn main() {
                                     eprintln!("Failed to bind mount {} to {}: {}", path, new, e);
                                 }
                             }
-                            Mount::Union { paths } => {
+                            MountPlan::Union { paths } => {
                                 let tmp_dir = match tempdir() {
                                     Ok(dir) => dir,
                                     Err(e) => {
@@ -216,7 +216,7 @@ fn main() {
                                     );
                                 }
                             }
-                            Mount::P9 { addr, path } => {
+                            MountPlan::P9 { addr, path } => {
                                 if let Err(err) = probe_remote_share(addr, path) {
                                     eprintln!("Failed to probe 9P {}@{}: {}", path, addr, err);
                                     continue;
@@ -234,7 +234,7 @@ fn main() {
                     }
                     #[cfg(not(target_os = "linux"))]
                     {
-                        let _ = old;
+                        let _ = mount_point;
                         eprintln!("Skipping mount {}: Linux-only host support", new);
                     }
                 }

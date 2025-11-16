@@ -1,7 +1,5 @@
-use planten_ns::{Mount, Namespace};
+use planten_ns::Namespace;
 use std::env;
-
-const NAMESPACE_FILE: &str = ".planten_namespace.json";
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -13,7 +11,7 @@ fn main() {
     let new = &args[1];
     let old: Vec<String> = args[2..].to_vec();
 
-    let mut ns = Namespace::load_from_file(NAMESPACE_FILE).unwrap_or_else(|e| {
+    let mut ns = Namespace::load_from_storage().unwrap_or_else(|e| {
         eprintln!("Error loading namespace: {}", e);
         Namespace::new()
     });
@@ -22,17 +20,12 @@ fn main() {
         ns.bind(new, &old[0]);
         println!("bound '{}' to '{}'", new, &old[0]);
     } else {
-        let mut union_mount = Mount::Union { paths: vec![] };
-        if let Mount::Union { paths } = &mut union_mount {
-            for path in old {
-                paths.push(path);
-            }
-        }
-        ns.add_mount(new, union_mount);
+        let refs: Vec<&str> = old.iter().map(String::as_str).collect();
+        ns.union_multi(new, refs.as_slice());
         println!("created union mount at '{}'", new);
     }
 
-    if let Err(e) = ns.save_to_file(NAMESPACE_FILE) {
+    if let Err(e) = ns.save_to_storage() {
         eprintln!("Error saving namespace: {}", e);
     }
 }

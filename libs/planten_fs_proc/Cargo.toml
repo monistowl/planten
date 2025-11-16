@@ -1,0 +1,17 @@
+[package]
+name = "planten_fs_proc"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+planten_9p = { version = "0.1.0", path = "../planten_9p" }
+planten_fs_core = { version = "0.1.0", path = "../planten_fs_core" }
+sysinfo = "0.30.11"
+
+[[bin]]
+name = "planten_fs_proc_server"
+path = "src/bin/server.rs"
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"

@@ -77,130 +77,103 @@ fn main() -> io::Result<()> {
     let handshake_frames = capture_handshake(&mut recorder)?;
     write_frames(traces_dir.join("handshake.bin"), &handshake_frames)?;
 
-    let (walk_req, walk_resp) = recorder.send(TWALK, encode_walk_body(1, 2, &["hello.txt"]))?;
+    let (walk_req, walk_resp, _) =
+        capture_exchange(&mut recorder, TWALK, encode_walk_body(1, 2, &["hello.txt"]))?;
     write_file(traces_dir.join("twalk_request.bin"), &walk_req)?;
-    write_file(traces_dir.join("walk_response.bin"), &frame_buf(&walk_resp))?;
+    write_file(traces_dir.join("walk_response.bin"), &walk_resp)?;
 
     // Open fid 2 for subsequent read/write operations.
-    let (data_open_req, data_open_resp) = recorder.send(TOPEN, encode_open_body(2, 2))?;
+    let (data_open_req, data_open_resp, _) =
+        capture_exchange(&mut recorder, TOPEN, encode_open_body(2, 2))?;
     write_file(traces_dir.join("topen_data_request.bin"), &data_open_req)?;
-    write_file(
-        traces_dir.join("ropen_data_response.bin"),
-        &frame_buf(&data_open_resp),
-    )?;
+    write_file(traces_dir.join("ropen_data_response.bin"), &data_open_resp)?;
 
-    let (read_req, read_resp) = recorder.send(TREAD, encode_read_body(2, 0, 128))?;
-    let read_response_frame = frame_buf(&read_resp);
-    let read_exchange_frames = vec![read_req, read_response_frame.clone()];
+    let (read_req, read_resp, _) =
+        capture_exchange(&mut recorder, TREAD, encode_read_body(2, 0, 128))?;
+    let read_exchange_frames = vec![read_req.clone(), read_resp.clone()];
     write_frames(traces_dir.join("read_exchange.bin"), &read_exchange_frames)?;
-    write_file(traces_dir.join("read_response.bin"), &read_response_frame)?;
+    write_file(traces_dir.join("read_response.bin"), &read_resp)?;
 
-    let (root_open_req, root_open_resp) = recorder.send(TOPEN, encode_open_body(1, 0))?;
+    let (root_open_req, root_open_resp, _) =
+        capture_exchange(&mut recorder, TOPEN, encode_open_body(1, 0))?;
     write_file(traces_dir.join("topen_root_request.bin"), &root_open_req)?;
-    write_file(
-        traces_dir.join("ropen_root_response.bin"),
-        &frame_buf(&root_open_resp),
-    )?;
+    write_file(traces_dir.join("ropen_root_response.bin"), &root_open_resp)?;
 
-    let (dir_req, dir_resp) = recorder.send(TREAD, encode_read_body(1, 0, 128))?;
+    let (dir_req, dir_resp, _) =
+        capture_exchange(&mut recorder, TREAD, encode_read_body(1, 0, 128))?;
     write_file(traces_dir.join("tread_dir_request.bin"), &dir_req)?;
-    write_file(
-        traces_dir.join("dir_read_response.bin"),
-        &frame_buf(&dir_resp),
-    )?;
+    write_file(traces_dir.join("dir_read_response.bin"), &dir_resp)?;
 
-    let (stat_req, stat_resp) = recorder.send(TSTAT, encode_stat_body(2))?;
+    let (stat_req, stat_resp, stat_msg) =
+        capture_exchange(&mut recorder, TSTAT, encode_stat_body(2))?;
     write_file(traces_dir.join("tstat_request.bin"), &stat_req)?;
-    write_file(
-        traces_dir.join("rstat_response.bin"),
-        &frame_buf(&stat_resp),
-    )?;
-    let mut stat = decode_stat(&mut Cursor::new(stat_resp.body.as_slice()))?;
+    write_file(traces_dir.join("rstat_response.bin"), &stat_resp)?;
+    let mut stat = decode_stat(&mut Cursor::new(stat_msg.body.as_slice()))?;
 
     let content = b"hello world";
-    let (write_req, write_resp) = recorder.send(TWRITE, encode_write_body(2, 0, content))?;
-    let write_response_frame = frame_buf(&write_resp);
-    let write_exchange_frames = vec![write_req, write_response_frame.clone()];
+    let (write_req, write_resp, _) =
+        capture_exchange(&mut recorder, TWRITE, encode_write_body(2, 0, content))?;
+    let write_exchange_frames = vec![write_req.clone(), write_resp.clone()];
     write_frames(
         traces_dir.join("write_exchange.bin"),
         &write_exchange_frames,
     )?;
-    write_file(
-        traces_dir.join("rwrite_response.bin"),
-        &write_response_frame,
-    )?;
+    write_file(traces_dir.join("rwrite_response.bin"), &write_resp)?;
 
     stat.length = content.len() as u64;
-    let (twstat_req, twstat_resp) = recorder.send(TWSTAT, encode_wstat_body(2, &stat))?;
+    let (twstat_req, twstat_resp, _) =
+        capture_exchange(&mut recorder, TWSTAT, encode_wstat_body(2, &stat))?;
     write_file(traces_dir.join("twstat_request.bin"), &twstat_req)?;
-    write_file(
-        traces_dir.join("rwstat_response.bin"),
-        &frame_buf(&twstat_resp),
-    )?;
+    write_file(traces_dir.join("rwstat_response.bin"), &twstat_resp)?;
 
-    let (remove_req, remove_resp) = recorder.send(TREMOVE, encode_remove_body(2))?;
-    let remove_response_frame = frame_buf(&remove_resp);
-    let remove_exchange_frames = vec![remove_req, remove_response_frame.clone()];
+    let (remove_req, remove_resp, _) =
+        capture_exchange(&mut recorder, TREMOVE, encode_remove_body(2))?;
+    let remove_exchange_frames = vec![remove_req.clone(), remove_resp.clone()];
     write_frames(
         traces_dir.join("remove_exchange.bin"),
         &remove_exchange_frames,
     )?;
-    write_file(
-        traces_dir.join("rremove_response.bin"),
-        &remove_response_frame,
-    )?;
+    write_file(traces_dir.join("rremove_response.bin"), &remove_resp)?;
 
-    let (walk_err_req, walk_err_resp) =
-        recorder.send(TWALK, encode_walk_body(1, 3, &["missing.txt"]))?;
+    let (walk_err_req, walk_err_resp, _) = capture_exchange(
+        &mut recorder,
+        TWALK,
+        encode_walk_body(1, 3, &["missing.txt"]),
+    )?;
     write_file(traces_dir.join("twalk_error_request.bin"), &walk_err_req)?;
-    write_file(
-        traces_dir.join("rerror_walk.bin"),
-        &frame_buf(&walk_err_resp),
-    )?;
+    write_file(traces_dir.join("rerror_walk.bin"), &walk_err_resp)?;
 
-    let (walk_multi_req, walk_multi_resp) =
-        recorder.send(TWALK, encode_walk_body(1, 4, &["hello.txt", "missing.txt"]))?;
+    let (walk_multi_req, walk_multi_resp, _) = capture_exchange(
+        &mut recorder,
+        TWALK,
+        encode_walk_body(1, 4, &["hello.txt", "missing.txt"]),
+    )?;
     write_file(traces_dir.join("twalk_multi_request.bin"), &walk_multi_req)?;
-    write_file(
-        traces_dir.join("rerror_walk_multi.bin"),
-        &frame_buf(&walk_multi_resp),
-    )?;
+    write_file(traces_dir.join("rerror_walk_multi.bin"), &walk_multi_resp)?;
 
-    let (flush_req, flush_resp) = recorder.send(TFLUSH, encode_flush_body(1))?;
+    let (flush_req, flush_resp, _) = capture_exchange(&mut recorder, TFLUSH, encode_flush_body(1))?;
     write_file(traces_dir.join("tflush_request.bin"), &flush_req)?;
-    write_file(
-        traces_dir.join("rflush_response.bin"),
-        &frame_buf(&flush_resp),
-    )?;
+    write_file(traces_dir.join("rflush_response.bin"), &flush_resp)?;
 
-    let (auth_req, auth_resp) = recorder.send(TAUTH, encode_auth_body(0, "user", ""))?;
+    let (auth_req, auth_resp, _) =
+        capture_exchange(&mut recorder, TAUTH, encode_auth_body(0, "user", ""))?;
     write_file(traces_dir.join("tauth_request.bin"), &auth_req)?;
-    write_file(
-        traces_dir.join("rauth_response.bin"),
-        &frame_buf(&auth_resp),
-    )?;
+    write_file(traces_dir.join("rauth_response.bin"), &auth_resp)?;
 
-    let (clone_req, clone_resp) =
-        recorder.send_with_tag(TCLONE, encode_clone_body(1, 5), 0x9999)?;
+    let (clone_req, clone_resp, _) =
+        capture_exchange_with_tag(&mut recorder, TCLONE, encode_clone_body(1, 5), 0x9999)?;
     write_file(traces_dir.join("tclone_request.bin"), &clone_req)?;
-    write_file(
-        traces_dir.join("rclone_response.bin"),
-        &frame_buf(&clone_resp),
-    )?;
+    write_file(traces_dir.join("rclone_response.bin"), &clone_resp)?;
 
-    let (tstat_err_req, tstat_err_resp) = recorder.send(TSTAT, encode_stat_body(99))?;
+    let (tstat_err_req, tstat_err_resp, _) =
+        capture_exchange(&mut recorder, TSTAT, encode_stat_body(99))?;
     write_file(traces_dir.join("tstat_error_request.bin"), &tstat_err_req)?;
-    write_file(
-        traces_dir.join("rerror_tstat.bin"),
-        &frame_buf(&tstat_err_resp),
-    )?;
+    write_file(traces_dir.join("rerror_tstat.bin"), &tstat_err_resp)?;
 
-    let (read_oob_req, read_oob_resp) = recorder.send(TREAD, encode_read_body(99, 0, 1))?;
+    let (read_oob_req, read_oob_resp, _) =
+        capture_exchange(&mut recorder, TREAD, encode_read_body(99, 0, 1))?;
     write_file(traces_dir.join("tread_oob_request.bin"), &read_oob_req)?;
-    write_file(
-        traces_dir.join("rerror_oob.bin"),
-        &frame_buf(&read_oob_resp),
-    )?;
+    write_file(traces_dir.join("rerror_oob.bin"), &read_oob_resp)?;
 
     Ok(())
 }
@@ -246,6 +219,27 @@ fn frame_buf(message: &RawMessage) -> Vec<u8> {
     buf.extend_from_slice(&message.tag.to_le_bytes());
     buf.extend_from_slice(&message.body);
     buf
+}
+
+fn capture_exchange(
+    recorder: &mut TraceRecorder<'_>,
+    msg_type: u8,
+    body: Vec<u8>,
+) -> io::Result<(Vec<u8>, Vec<u8>, RawMessage)> {
+    let (req, resp) = recorder.send(msg_type, body)?;
+    let resp_bytes = frame_buf(&resp);
+    Ok((req, resp_bytes, resp))
+}
+
+fn capture_exchange_with_tag(
+    recorder: &mut TraceRecorder<'_>,
+    msg_type: u8,
+    body: Vec<u8>,
+    tag: u16,
+) -> io::Result<(Vec<u8>, Vec<u8>, RawMessage)> {
+    let (req, resp) = recorder.send_with_tag(msg_type, body, tag)?;
+    let resp_bytes = frame_buf(&resp);
+    Ok((req, resp_bytes, resp))
 }
 
 fn repo_root() -> PathBuf {

@@ -1,0 +1,8 @@
+[package]
+name = "proc_client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+planten_9p = { path = "../../libs/planten_9p" }
+tokio = { version = "1", features = ["full"] }

@@ -4,20 +4,40 @@ use std::hash::{Hash, Hasher};
 use std::io::{self, Cursor, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
+use std::thread;
 
-use planten_9p::{RawMessage, build_frame, messages::*};
+use planten_9p::{build_frame, messages::*, RawMessage, Stat};
 use planten_fs_core::FsServer;
 
 use crate::RamFs;
+
+#[derive(Clone)]
+struct FidState {
+    path: String,
+    qid: [u8; 13],
+    open_mode: Option<u8>,
+}
+
+impl FidState {
+    fn new(path: String, qid: [u8; 13]) -> Self {
+        FidState {
+            path,
+            qid,
+            open_mode: None,
+        }
+    }
+}
 
 pub fn run_server(listener: TcpListener, ramfs: Arc<Mutex<RamFs>>) -> io::Result<()> {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
                 let ramfs = Arc::clone(&ramfs);
-                if let Err(err) = handle_client(stream, ramfs) {
-                    eprintln!("connection error: {}", err);
-                }
+                thread::spawn(move || {
+                    if let Err(err) = handle_client(stream, ramfs) {
+                        eprintln!("connection error: {}", err);
+                    }
+                });
             }
             Err(err) => eprintln!("accept error: {}", err),
         }
@@ -31,7 +51,7 @@ pub fn run_single(listener: TcpListener, ramfs: Arc<Mutex<RamFs>>) -> io::Result
 }
 
 pub fn handle_client(mut stream: TcpStream, ramfs: Arc<Mutex<RamFs>>) -> io::Result<()> {
-    let mut fid_paths: HashMap<u32, String> = HashMap::new();
+    let mut fid_states: HashMap<u32, FidState> = HashMap::new();
 
     loop {
         let message = match RawMessage::read_from(&mut stream) {
@@ -46,40 +66,40 @@ pub fn handle_client(mut stream: TcpStream, ramfs: Arc<Mutex<RamFs>>) -> io::Res
 
         match message.msg_type {
             TVERSION => handle_version(&mut stream, message.tag, &message.body)?,
-            TATTACH => handle_attach(&mut stream, message.tag, &message.body, &mut fid_paths)?,
+            TATTACH => handle_attach(&mut stream, message.tag, &message.body, &mut fid_states)?,
             TWALK => handle_walk(
                 &mut stream,
                 message.tag,
                 &message.body,
-                &mut fid_paths,
+                &mut fid_states,
                 &ramfs,
             )?,
-            TOPEN => handle_open(&mut stream, message.tag, &message.body, &fid_paths, &ramfs)?,
-            TREAD => handle_read(&mut stream, message.tag, &message.body, &fid_paths, &ramfs)?,
-            TWRITE => handle_write(&mut stream, message.tag, &message.body, &fid_paths, &ramfs)?,
-            TWSTAT => handle_wstat(&mut stream, message.tag, &message.body, &fid_paths, &ramfs)?,
+            TOPEN => handle_open(
+                &mut stream,
+                message.tag,
+                &message.body,
+                &mut fid_states,
+                &ramfs,
+            )?,
+            TREAD => handle_read(&mut stream, message.tag, &message.body, &fid_states, &ramfs)?,
+            TWRITE => handle_write(&mut stream, message.tag, &message.body, &fid_states, &ramfs)?,
+            TWSTAT => handle_wstat(&mut stream, message.tag, &message.body, &fid_states, &ramfs)?,
             TFLUSH => handle_flush(&mut stream, message.tag, &message.body)?,
             TREMOVE => handle_remove(
                 &mut stream,
                 message.tag,
                 &message.body,
-                &mut fid_paths,
+                &mut fid_states,
                 &ramfs,
             )?,
-            TCLUNK => handle_clunk(&mut stream, message.tag, &message.body, &mut fid_paths)?,
-            TSTAT => handle_stat(
-                &mut stream,
-                message.tag,
-                &message.body,
-                &fid_paths,
-                &ramfs,
-            )?,
-            TCLONE => handle_clone(&mut stream, message.tag, &message.body, &mut fid_paths)?,
+            TCLUNK => handle_clunk(&mut stream, message.tag, &message.body, &mut fid_states)?,
+            TSTAT => handle_stat(&mut stream, message.tag, &message.body, &fid_states, &ramfs)?,
+            TCLONE => handle_clone(&mut stream, message.tag, &message.body, &mut fid_states)?,
             TCREATE => handle_create(
                 &mut stream,
                 message.tag,
                 &message.body,
-                &mut fid_paths,
+                &mut fid_states,
                 &ramfs,
             )?,
             TAUTH => handle_auth(&mut stream, message.tag, &message.body)?,
@@ -88,29 +108,31 @@ pub fn handle_client(mut stream: TcpStream, ramfs: Arc<Mutex<RamFs>>) -> io::Res
     }
 }
 
-fn handle_auth(
-    stream: &mut TcpStream,
-    tag: u16,
-    _body: &[u8],
-) -> io::Result<()> {
-    send_error(stream, tag, "authentication not supported")
+fn handle_auth(stream: &mut TcpStream, tag: u16, _body: &[u8]) -> io::Result<()> {
+    // For now, we don't support authentication, but we need to reply
+    // with a valid Rauth message to allow clients to connect without auth.
+    // The aqid should represent a file on which read/write operations
+    // can be performed to complete the authentication protocol.
+    // Since we don't have one, we'll send a dummy qid.
+    let aqid = [0u8; 13]; // A dummy qid.
+    send_response(stream, RAUTH, tag, &aqid)
 }
 
 fn handle_create(
     stream: &mut TcpStream,
     tag: u16,
     body: &[u8],
-    fid_paths: &mut HashMap<u32, String>,
+    fid_states: &mut HashMap<u32, FidState>,
     ramfs: &Arc<Mutex<RamFs>>,
 ) -> io::Result<()> {
     let mut cursor = Cursor::new(body);
     let fid = read_u32(&mut cursor)?;
     let name = read_string(&mut cursor)?;
     let perm = read_u32(&mut cursor)?;
-    let mode = read_u8(&mut cursor)?;
+    let _mode = read_u8(&mut cursor)?;
 
-    let path = match fid_paths.get(&fid) {
-        Some(path) => path,
+    let path = match fid_states.get(&fid) {
+        Some(state) => &state.path,
         None => {
             return send_error(stream, tag, "unknown fid");
         }
@@ -123,7 +145,8 @@ fn handle_create(
         return send_error(stream, tag, "file exists");
     }
 
-    if perm & 0x80000000 != 0 { // DMDIR
+    if perm & 0x80000000 != 0 {
+        // DMDIR
         guard.create_dir(&new_path);
     } else {
         guard.create_file(&new_path, &[]);
@@ -139,20 +162,20 @@ fn handle_clone(
     stream: &mut TcpStream,
     tag: u16,
     body: &[u8],
-    fid_paths: &mut HashMap<u32, String>,
+    fid_states: &mut HashMap<u32, FidState>,
 ) -> io::Result<()> {
     let mut cursor = Cursor::new(body);
     let fid = read_u32(&mut cursor)?;
     let newfid = read_u32(&mut cursor)?;
 
-    let path = match fid_paths.get(&fid) {
-        Some(path) => path.clone(),
+    let state = match fid_states.get(&fid) {
+        Some(state) => state.clone(),
         None => {
             return send_error(stream, tag, "unknown fid");
         }
     };
 
-    fid_paths.insert(newfid, path);
+    fid_states.insert(newfid, state);
 
     send_response(stream, RCLONE, tag, &[])
 }
@@ -161,14 +184,14 @@ fn handle_stat(
     stream: &mut TcpStream,
     tag: u16,
     body: &[u8],
-    fid_paths: &HashMap<u32, String>,
+    fid_states: &HashMap<u32, FidState>,
     ramfs: &Arc<Mutex<RamFs>>,
 ) -> io::Result<()> {
     let mut cursor = Cursor::new(body);
     let fid = read_u32(&mut cursor)?;
 
-    let path = match fid_paths.get(&fid) {
-        Some(path) => path,
+    let path = match fid_states.get(&fid) {
+        Some(state) => &state.path,
         None => {
             return send_error(stream, tag, "unknown fid");
         }
@@ -195,7 +218,6 @@ fn handle_stat(
     send_response(stream, RSTAT, tag, &stat)
 }
 
-
 fn handle_version(stream: &mut TcpStream, tag: u16, body: &[u8]) -> io::Result<()> {
     let mut cursor = Cursor::new(body);
     let _msize = read_u32(&mut cursor)?;
@@ -208,14 +230,16 @@ fn handle_attach(
     stream: &mut TcpStream,
     tag: u16,
     body: &[u8],
-    fid_paths: &mut HashMap<u32, String>,
+    fid_states: &mut HashMap<u32, FidState>,
 ) -> io::Result<()> {
     let mut cursor = Cursor::new(body);
     let fid = read_u32(&mut cursor)?;
     let _afid = read_u32(&mut cursor)?;
     let _uname = read_string(&mut cursor)?;
     let _aname = read_string(&mut cursor)?;
-    fid_paths.insert(fid, "/".to_string());
+    let root_path = "/".to_string();
+    let root_qid = encode_qid(&root_path);
+    fid_states.insert(fid, FidState::new(root_path.clone(), root_qid));
     let mut response = Vec::new();
     response.extend_from_slice(&encode_qid("/"));
     send_response(stream, RATTACH, tag, &response)
@@ -225,7 +249,7 @@ fn handle_walk(
     stream: &mut TcpStream,
     tag: u16,
     body: &[u8],
-    fid_paths: &mut HashMap<u32, String>,
+    fid_states: &mut HashMap<u32, FidState>,
     ramfs: &Arc<Mutex<RamFs>>,
 ) -> io::Result<()> {
     let mut cursor = Cursor::new(body);
@@ -233,12 +257,12 @@ fn handle_walk(
     let newfid = read_u32(&mut cursor)?;
     let nwname = read_u16(&mut cursor)?;
 
-    let base_path = fid_paths
+    let base_state = fid_states
         .get(&fid)
         .cloned()
-        .unwrap_or_else(|| "/".to_string());
-    let mut current_path = base_path.clone();
-    let mut qids: Vec<String> = Vec::new();
+        .unwrap_or_else(|| FidState::new("/".to_string(), encode_qid("/")));
+    let mut current_path = base_state.path.clone();
+    let mut qids: Vec<[u8; 13]> = Vec::new();
 
     for _ in 0..nwname {
         let name = read_string(&mut cursor)?;
@@ -246,7 +270,7 @@ fn handle_walk(
             Some(next_path) => {
                 if path_exists(&next_path, ramfs) {
                     current_path = next_path.clone();
-                    qids.push(next_path);
+                    qids.push(encode_qid(&next_path));
                 } else {
                     return send_error(
                         stream,
@@ -265,12 +289,13 @@ fn handle_walk(
         }
     }
 
-    fid_paths.insert(newfid, current_path.clone());
+    let new_qid = qids.last().copied().unwrap_or(base_state.qid);
+    fid_states.insert(newfid, FidState::new(current_path.clone(), new_qid));
 
     let mut response = Vec::new();
     response.extend_from_slice(&(qids.len() as u16).to_le_bytes());
-    for path in qids {
-        response.extend_from_slice(&encode_qid(&path));
+    for qid in qids {
+        response.extend_from_slice(&qid);
     }
     send_response(stream, RWALK, tag, &response)
 }
@@ -279,26 +304,28 @@ fn handle_open(
     stream: &mut TcpStream,
     tag: u16,
     body: &[u8],
-    fid_paths: &HashMap<u32, String>,
+    fid_states: &mut HashMap<u32, FidState>,
     ramfs: &Arc<Mutex<RamFs>>,
 ) -> io::Result<()> {
     let mut cursor = Cursor::new(body);
     let fid = read_u32(&mut cursor)?;
     let _mode = read_u8(&mut cursor)?;
 
-    let path = match fid_paths.get(&fid) {
-        Some(path) => path,
-        None => {
-            return send_error(stream, tag, "unknown fid");
-        }
+    let path = match fid_states.get(&fid) {
+        Some(state) => state.path.clone(),
+        None => return send_error(stream, tag, "unknown fid"),
     };
 
-    if !path_exists(path, ramfs) {
+    if !path_exists(path.as_str(), ramfs) {
         return send_error(stream, tag, "file not found");
     }
 
+    let state = fid_states.get_mut(&fid).unwrap();
+    state.qid = encode_qid(path.as_str());
+    state.open_mode = Some(_mode);
+
     let mut response = Vec::new();
-    response.extend_from_slice(&encode_qid(path));
+    response.extend_from_slice(&state.qid);
     response.extend_from_slice(&0u32.to_le_bytes());
     send_response(stream, ROPEN, tag, &response)
 }
@@ -307,7 +334,7 @@ fn handle_read(
     stream: &mut TcpStream,
     tag: u16,
     body: &[u8],
-    fid_paths: &HashMap<u32, String>,
+    fid_states: &HashMap<u32, FidState>,
     ramfs: &Arc<Mutex<RamFs>>,
 ) -> io::Result<()> {
     let mut cursor = Cursor::new(body);
@@ -315,18 +342,26 @@ fn handle_read(
     let offset = read_u64(&mut cursor)?;
     let count = read_u32(&mut cursor)?;
 
-    let path = match fid_paths.get(&fid) {
-        Some(path) => path,
-        None => {
-            return send_error(stream, tag, "unknown fid");
-        }
+    let state = match fid_states.get(&fid) {
+        Some(state) => state,
+        None => return send_error(stream, tag, "unknown fid"),
     };
 
+    let mode = match state.open_mode {
+        Some(mode) => mode,
+        None => return send_error(stream, tag, "fid not open"),
+    };
+
+    if !mode_allows_read(mode) {
+        return send_error(stream, tag, "fid not open for read");
+    }
+
+    let path = state.path.clone();
     let data = {
         let guard = ramfs.lock().unwrap();
-        if let Some(bytes) = guard.read_file(path) {
+        if let Some(bytes) = guard.read_file(&path) {
             Some(bytes.to_vec())
-        } else if let Some(entries) = guard.list_dir(path) {
+        } else if let Some(entries) = guard.list_dir(&path) {
             let joined = entries.join("\n") + "\n";
             Some(joined.into_bytes())
         } else {
@@ -355,7 +390,7 @@ fn handle_write(
     stream: &mut TcpStream,
     tag: u16,
     body: &[u8],
-    fid_paths: &HashMap<u32, String>,
+    fid_states: &HashMap<u32, FidState>,
     ramfs: &Arc<Mutex<RamFs>>,
 ) -> io::Result<()> {
     let mut cursor = Cursor::new(body);
@@ -365,16 +400,24 @@ fn handle_write(
     let mut buffer = vec![0u8; count as usize];
     cursor.read_exact(&mut buffer)?;
 
-    let path = match fid_paths.get(&fid) {
-        Some(path) => path,
-        None => {
-            return send_error(stream, tag, "unknown fid");
-        }
+    let state = match fid_states.get(&fid) {
+        Some(state) => state,
+        None => return send_error(stream, tag, "unknown fid"),
     };
 
+    let mode = match state.open_mode {
+        Some(mode) => mode,
+        None => return send_error(stream, tag, "fid not open"),
+    };
+
+    if !mode_allows_write(mode) {
+        return send_error(stream, tag, "fid not open for write");
+    }
+
+    let path = state.path.clone();
     let written = {
         let mut guard = ramfs.lock().unwrap();
-        guard.write(path, offset, &buffer).unwrap_or(0)
+        guard.write(&path, offset, &buffer).unwrap_or(0)
     };
 
     let mut response = Vec::new();
@@ -386,17 +429,28 @@ fn handle_wstat(
     stream: &mut TcpStream,
     tag: u16,
     body: &[u8],
-    fid_paths: &HashMap<u32, String>,
-    _ramfs: &Arc<Mutex<RamFs>>,
+    fid_states: &HashMap<u32, FidState>,
+    ramfs: &Arc<Mutex<RamFs>>,
 ) -> io::Result<()> {
     let mut cursor = Cursor::new(body);
     let fid = read_u32(&mut cursor)?;
-    if !fid_paths.contains_key(&fid) {
-        return send_error(stream, tag, "unknown fid");
+    let path = match fid_states.get(&fid) {
+        Some(state) => state.path.clone(),
+        None => return send_error(stream, tag, "unknown fid"),
+    };
+
+    let stat_to_set = match planten_9p::decode_stat(&mut cursor) {
+        Ok(s) => s,
+        Err(e) => return send_error(stream, tag, &format!("invalid stat format: {}", e)),
+    };
+
+    let mut guard = ramfs.lock().unwrap();
+
+    if guard.wstat_from_stat(&path, &stat_to_set).is_some() {
+        send_response(stream, RWSTAT, tag, &[])
+    } else {
+        send_error(stream, tag, "wstat failed")
     }
-    // skip stat for now by reading length
-    let _stat_size = read_u16(&mut cursor)?;
-    send_response(stream, RWSTAT, tag, &[])
 }
 
 fn handle_flush(stream: &mut TcpStream, tag: u16, _body: &[u8]) -> io::Result<()> {
@@ -407,14 +461,14 @@ fn handle_remove(
     stream: &mut TcpStream,
     tag: u16,
     body: &[u8],
-    fid_paths: &mut HashMap<u32, String>,
+    fid_states: &mut HashMap<u32, FidState>,
     ramfs: &Arc<Mutex<RamFs>>,
 ) -> io::Result<()> {
     let mut cursor = Cursor::new(body);
     let fid = read_u32(&mut cursor)?;
 
-    let path = match fid_paths.get(&fid).cloned() {
-        Some(path) => path,
+    let path = match fid_states.get(&fid) {
+        Some(state) => state.path.clone(),
         None => return send_error(stream, tag, "unknown fid"),
     };
 
@@ -423,7 +477,7 @@ fn handle_remove(
         guard.remove(&path).is_some()
     };
 
-    fid_paths.remove(&fid);
+    fid_states.remove(&fid);
 
     if success {
         send_response(stream, RREMOVE, tag, &[])
@@ -436,11 +490,11 @@ fn handle_clunk(
     stream: &mut TcpStream,
     tag: u16,
     body: &[u8],
-    fid_paths: &mut HashMap<u32, String>,
+    fid_states: &mut HashMap<u32, FidState>,
 ) -> io::Result<()> {
     let mut cursor = Cursor::new(body);
     let fid = read_u32(&mut cursor)?;
-    fid_paths.remove(&fid);
+    fid_states.remove(&fid);
     send_response(stream, RCLUNK, tag, &[])
 }
 
@@ -516,6 +570,15 @@ fn encode_string_as_bytes(s: &str) -> Vec<u8> {
     buf.extend_from_slice(&(s.len() as u16).to_le_bytes());
     buf.extend_from_slice(s.as_bytes());
     buf
+}
+
+fn mode_allows_read(mode: u8) -> bool {
+    matches!(mode & 0x3, 0 | 2 | 3)
+}
+
+fn mode_allows_write(mode: u8) -> bool {
+    let typ = mode & 0x3;
+    typ == 1 || typ == 2 || (mode & 0x10 != 0)
 }
 
 fn path_exists(path: &str, ramfs: &Arc<Mutex<RamFs>>) -> bool {

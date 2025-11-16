@@ -1,5 +1,4 @@
 use planten_fs_core::{FsServer, Inode};
-use std::collections::HashMap;
 
 pub struct RamFs {
     root: Inode,
@@ -10,6 +9,58 @@ impl RamFs {
         RamFs {
             root: Inode::new("/", 0o755 | 0x80000000, "user", "group"),
         }
+    }
+
+    pub fn wstat_from_stat(&mut self, path: &str, stat: &planten_9p::Stat) -> Option<()> {
+        let components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        if components.is_empty() {
+            // root
+            if stat.mode != !0u32 {
+                self.root.mode = stat.mode;
+            }
+            if stat.mtime != !0u32 {
+                self.root.mtime = stat.mtime;
+            }
+            if !stat.gid.is_empty() {
+                self.root.gid = stat.gid.clone();
+            }
+            return Some(());
+        }
+
+        let (filename, path_parts) = components.split_last()?;
+        let mut current = &mut self.root;
+        for part in path_parts {
+            current = current.children.get_mut(*part)?;
+        }
+
+        let mut inode = current.children.get(filename)?.clone();
+
+        if stat.mode != !0u32 {
+            inode.mode = stat.mode;
+        }
+        if stat.mtime != !0u32 {
+            inode.mtime = stat.mtime;
+        }
+        if stat.length != !0u64 {
+            inode.data.resize(stat.length as usize, 0);
+        }
+        if !stat.gid.is_empty() {
+            inode.gid = stat.gid.clone();
+        }
+
+        if !stat.name.is_empty() && stat.name != *filename {
+            // rename
+            if current.children.contains_key(&stat.name) {
+                return None; // exists
+            }
+            inode.name = stat.name.clone();
+            current.children.remove(*filename);
+            current.children.insert(inode.name.clone(), inode);
+        } else {
+            *current.children.get_mut(filename).unwrap() = inode;
+        }
+
+        Some(())
     }
 
     pub fn create_file(&mut self, path: &str, data: &[u8]) {
@@ -87,8 +138,8 @@ impl FsServer for RamFs {
         self.read_file(path).map(|_| ())
     }
 
-    fn read(&self, path: &str) -> Option<&[u8]> {
-        self.read_file(path)
+    fn read(&self, path: &str) -> Option<Vec<u8>> {
+        self.read_file(path).map(|data| data.to_vec())
     }
 
     fn write(&mut self, path: &str, offset: u64, data: &[u8]) -> Option<u32> {

@@ -100,6 +100,15 @@ impl P9Client {
         Ok(negotiated_version)
     }
 
+    pub fn auth(&mut self, afid: u32, uname: &str, aname: &str) -> io::Result<Qid> {
+        let body = encode_auth_body(afid, uname, aname);
+        let response = self.send_and_wait(TAUTH, &body)?;
+        ensure_msg_type(&response, RAUTH)?;
+        let mut cursor = Cursor::new(response.body.as_slice());
+        let aqid = decode_qid(&mut cursor)?;
+        Ok(aqid)
+    }
+
     pub fn attach(
         &mut self,
         fid: u32,
@@ -135,6 +144,16 @@ impl P9Client {
         Ok(iounit)
     }
 
+    pub fn create(&mut self, fid: u32, name: &str, perm: u32, mode: u8) -> io::Result<(Qid, u32)> {
+        let body = encode_create_body(fid, name, perm, mode);
+        let response = self.send_and_wait(TCREATE, &body)?;
+        ensure_msg_type(&response, RCREATE)?;
+        let mut cursor = Cursor::new(response.body.as_slice());
+        let qid = decode_qid(&mut cursor)?;
+        let iounit = decode_u32(&mut cursor)?;
+        Ok((qid, iounit))
+    }
+
     pub fn read(&mut self, fid: u32, offset: u64, count: u32) -> io::Result<Vec<u8>> {
         let body = encode_read_body(fid, offset, count);
         let response = self.send_and_wait(TREAD, &body)?;
@@ -146,10 +165,49 @@ impl P9Client {
         Ok(payload)
     }
 
+    pub fn write(&mut self, fid: u32, offset: u64, data: &[u8]) -> io::Result<u32> {
+        let body = encode_write_body(fid, offset, data);
+        let response = self.send_and_wait(TWRITE, &body)?;
+        ensure_msg_type(&response, RWRITE)?;
+        let mut cursor = Cursor::new(response.body.as_slice());
+        let count = decode_u32(&mut cursor)?;
+        Ok(count)
+    }
+
     pub fn clunk(&mut self, fid: u32) -> io::Result<()> {
         let body = encode_clunk_body(fid);
         let response = self.send_and_wait(TCLUNK, &body)?;
         ensure_msg_type(&response, RCLUNK)?;
+        Ok(())
+    }
+
+    pub fn stat(&mut self, fid: u32) -> io::Result<Stat> {
+        let body = encode_stat_body(fid);
+        let response = self.send_and_wait(TSTAT, &body)?;
+        ensure_msg_type(&response, RSTAT)?;
+        let mut cursor = Cursor::new(response.body.as_slice());
+        let stat = decode_stat(&mut cursor)?;
+        Ok(stat)
+    }
+
+    pub fn wstat(&mut self, fid: u32, stat: &Stat) -> io::Result<()> {
+        let body = encode_wstat_body(fid, stat);
+        let response = self.send_and_wait(TWSTAT, &body)?;
+        ensure_msg_type(&response, RWSTAT)?;
+        Ok(())
+    }
+
+    pub fn remove(&mut self, fid: u32) -> io::Result<()> {
+        let body = encode_remove_body(fid);
+        let response = self.send_and_wait(TREMOVE, &body)?;
+        ensure_msg_type(&response, RREMOVE)?;
+        Ok(())
+    }
+
+    pub fn flush(&mut self, oldtag: u16) -> io::Result<()> {
+        let body = encode_flush_body(oldtag);
+        let response = self.send_and_wait(TFLUSH, &body)?;
+        ensure_msg_type(&response, RFLUSH)?;
         Ok(())
     }
 }

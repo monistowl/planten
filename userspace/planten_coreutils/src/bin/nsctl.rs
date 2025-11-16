@@ -1,41 +1,38 @@
-use planten_ns::Namespace;
-use std::env;
-
-const NAMESPACE_FILE: &str = ".planten_namespace.json";
+use planten_ns::{Mount, Namespace};
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 {
         eprintln!("usage: nsctl");
         return;
     }
 
-    match Namespace::load_from_file(NAMESPACE_FILE) {
+    match Namespace::load_from_storage() {
         Ok(ns) => {
             if ns.mounts().is_empty() {
                 println!("No mounts in namespace.");
             } else {
                 println!("Current Namespace:");
-                for (path, mount) in ns.mounts() {
-                    match mount {
-                        planten_ns::Mount::Bind { path: old_path } => {
-                            println!("  {} -> (bind) {}", path, old_path);
+                for entry in ns.mounts() {
+                    match &entry.mount {
+                        Mount::Bind { path: old_path } => {
+                            println!("  {} -> (bind) {}", entry.target, old_path);
                         }
-                        planten_ns::Mount::Union { paths } => {
-                            println!("  {} -> (union) {:?}", path, paths);
+                        Mount::Union { paths } => {
+                            println!("  {} -> (union) {:?}", entry.target, paths);
                         }
-                        planten_ns::Mount::P9 {
+                        Mount::P9 {
                             addr,
                             path: p9_path,
                         } => {
-                            println!("  {} -> (p9) {}@{}", path, p9_path, addr);
+                            println!("  {} -> (p9) {}@{}", entry.target, p9_path, addr);
                         }
                     }
                 }
             }
         }
         Err(e) => {
-            eprintln!("Error loading namespace from {}: {}", NAMESPACE_FILE, e);
+            eprintln!("Error loading namespace: {}", e);
             eprintln!("A new namespace will be created on the first 'bind' or 'mount' operation.");
         }
     }

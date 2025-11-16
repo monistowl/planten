@@ -5,8 +5,9 @@ use std::path::PathBuf;
 use planten_9p::RawMessage;
 use planten_9p::decode_stat;
 use planten_9p::messages::{
-    RATTACH, RCLONE, RERROR, ROPEN, RREAD, RSTAT, RVERSION, RWALK, RWRITE, TATTACH, TCLONE, TREAD,
-    TSTAT, TVERSION, TWALK,
+    RATTACH, RAUTH, RCLONE, RCREATE, RERROR, RFLUSH, ROPEN, RREAD, RREMOVE, RSTAT, RVERSION,
+    RWALK, RWRITE, TATTACH, TAUTH, TCLONE, TCREATE, TFLUSH, TREAD, TREMOVE, TSTAT, TVERSION,
+    TWALK, TWSTAT, RWSTAT, TWRITE,
 };
 
 fn read_u16(cursor: &mut Cursor<&[u8]>) -> u16 {
@@ -223,3 +224,92 @@ fn golden_tstat_error_trace_matches() {
     cursor.read_exact(&mut buffer).unwrap();
     assert_eq!(&buffer, b"unknown fid");
 }
+
+#[test]
+fn golden_wstat_trace_parses() {
+    let bytes = fs::read(repo_trace_path("twstat_request.bin")).unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, TWSTAT);
+    assert_eq!(frame.tag, 0x0008);
+
+    let mut cursor = Cursor::new(frame.body.as_slice());
+    let fid = read_u32(&mut cursor);
+    assert_eq!(fid, 2);
+    let stat = decode_stat(&mut cursor).unwrap();
+    assert_eq!(stat.name, "newname.txt");
+
+    let bytes = fs::read(repo_trace_path("rwstat_response.bin")).unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, RWSTAT);
+    assert_eq!(frame.tag, 0x0008);
+    assert!(frame.body.is_empty());
+}
+
+#[test]
+fn golden_create_trace_parses() {
+    let bytes = fs::read(repo_trace_path("tcreate_request.bin")).unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, TCREATE);
+    assert_eq!(frame.tag, 0x0009);
+
+    let bytes = fs::read(repo_trace_path("rcreate_response.bin")).unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, RCREATE);
+    assert_eq!(frame.tag, 0x0009);
+
+    let mut cursor = Cursor::new(frame.body.as_slice());
+    let qid = planten_9p::decode_qid(&mut cursor).unwrap();
+    let iounit = read_u32(&mut cursor);
+    assert_eq!(iounit, 0);
+}
+
+#[test]
+fn golden_remove_trace_parses() {
+    let frames = read_trace_messages("remove_exchange.bin");
+    assert_eq!(frames.len(), 2);
+    let t_frame = &frames[0];
+    let r_frame = &frames[1];
+
+    assert_eq!(t_frame.msg_type, TREMOVE);
+    assert_eq!(t_frame.tag, 0x000a);
+
+    assert_eq!(r_frame.msg_type, RREMOVE);
+    assert_eq!(r_frame.tag, 0x000a);
+    assert!(r_frame.body.is_empty());
+}
+
+#[test]
+fn golden_flush_trace_parses() {
+    let bytes = fs::read(repo_trace_path("tflush_request.bin")).unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, TFLUSH);
+    assert_eq!(frame.tag, 0x000c);
+
+    let mut cursor = Cursor::new(frame.body.as_slice());
+    let oldtag = read_u16(&mut cursor);
+    assert_eq!(oldtag, 0xdead);
+
+    let bytes = fs::read(repo_trace_path("rflush_response.bin")).unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, RFLUSH);
+    assert_eq!(frame.tag, 0x000c);
+    assert!(frame.body.is_empty());
+}
+
+#[test]
+fn golden_auth_trace_parses() {
+    let bytes = fs::read(repo_trace_path("tauth_request.bin")).unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, TAUTH);
+    assert_eq!(frame.tag, 0x0001);
+
+    let bytes = fs::read(repo_trace_path("rauth_response.bin")).unwrap();
+    let frame = RawMessage::from_bytes(&bytes).unwrap();
+    assert_eq!(frame.msg_type, RAUTH);
+    assert_eq!(frame.tag, 0x0001);
+
+    let mut cursor = Cursor::new(frame.body.as_slice());
+    let aqid = planten_9p::decode_qid(&mut cursor).unwrap();
+    assert_eq!(aqid.qtype, 0x80); // QTDIR
+}
+
