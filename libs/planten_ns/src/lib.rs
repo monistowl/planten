@@ -226,4 +226,38 @@ mod tests {
             panic!("expected union plan");
         }
     }
+
+    #[test]
+    fn mount_plan_merges_adjacent_union_entries() {
+        let mut ns = Namespace::new();
+        ns.union("/union", "/first");
+        ns.union("/union", "/second");
+
+        let plan = ns.mount_plan();
+        assert_eq!(plan.len(), 1);
+        if let MountPlan::Union { paths } = &plan[0].1 {
+            assert_eq!(paths, &vec!["/first".to_string(), "/second".to_string()]);
+        } else {
+            panic!("expected a single union entry");
+        }
+    }
+
+    #[test]
+    fn mount_plan_splits_unions_when_target_changes() {
+        let mut ns = Namespace::new();
+        ns.union("/union", "/first");
+        ns.bind("/other", "/x");
+        ns.union("/union", "/second");
+
+        let plan = ns.mount_plan();
+        assert_eq!(plan.len(), 3);
+        assert_eq!(plan[0].0, "/union");
+        assert!(matches!(plan[1].1, MountPlan::Bind { .. }));
+        assert_eq!(plan[2].0, "/union");
+        if let MountPlan::Union { paths } = &plan[2].1 {
+            assert_eq!(paths, &vec!["/second".to_string()]);
+        } else {
+            panic!("expected union entry after bind");
+        }
+    }
 }
