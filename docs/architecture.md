@@ -45,3 +45,17 @@ other suites replay those sequences against the server and assert on the recorde
 Developers regenerate fixtures with `cargo run -p capture_golden` whenever the protocol behavior
 changes; `docs/development.md` documents that workflow alongside the nightly toolchain and linting
 guardrails.
+
+## ProcFS tree and golden capture
+
+- `libs/planten_fs_proc` now exposes a `/proc` tree whose per-pid directories mirror the Plan 9 layout:
+  `cmdline`, `status`, `stat`, `statm`, `info`, `mounts`, `fd/`, and `task/self` all round-trip through
+  the same `FsServer` trait used by RAMFS. Each directory listing and file stat incorporates real-time
+  data from `sysinfo`, while placeholder `fd`/`task` entries keep the tree navigable when the host
+  provides fewer details.
+- The golden trace workflow now includes a ProcFS recorder (`tools/capture_procfs`). It spins up the
+  ProcFS server, issues a fixed sequence of handshake, root, and per-pid operations, and dumps the
+  resulting request/response pairs under `tests/proc_golden`. The new `libs/planten_fs_proc/tests/proc_golden_integration.rs`
+  test plays back the handshake/root sequence and ensures the recorded response types still match the
+  live server, making it easy to spot regressions when adding new proc entries or changing data
+  formatting.

@@ -94,6 +94,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "capture_procfs"
+version = "0.1.0"
+dependencies = [
+ "planten_9p",
+ "planten_fs_proc",
+]
+
+[[package]]
 name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

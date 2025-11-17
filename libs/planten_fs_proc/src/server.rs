@@ -17,6 +17,21 @@ use crate::fs::ProcFs;
 const MAX_MSG_SIZE: u32 = 8192;
 const VERSION_STRING: &str = "9P2000";
 
+pub fn run_server(listener: TcpListener, fs: Arc<Mutex<ProcFs>>) -> io::Result<()> {
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                let fs = Arc::clone(&fs);
+                if let Err(err) = handle_client(stream, fs) {
+                    eprintln!("connection error: {}", err);
+                }
+            }
+            Err(err) => eprintln!("accept error: {}", err),
+        }
+    }
+    Ok(())
+}
+
 struct FidState {
     path: String,
     qid: Qid,

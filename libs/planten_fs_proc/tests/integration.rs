@@ -102,6 +102,82 @@ fn read_procfs() {
 
     assert!(found);
 
+    // Walk/status already validated.
+
+    // fd directory + entry
+    let walk_fd = session.walk(1, 3, &[&self_pid, "fd"]).unwrap();
+    assert_eq!(walk_fd.msg_type, RWALK);
+    session.open(3, 0).unwrap();
+    let dir_fd = session.read(3, 0, 4096).unwrap();
+    assert_eq!(dir_fd.msg_type, RREAD);
+    let mut cursor = Cursor::new(dir_fd.body.as_slice());
+    let len = decode_u32(&mut cursor).unwrap();
+    let mut fd_bytes = vec![0; len as usize];
+    cursor.read_exact(&mut fd_bytes).unwrap();
+    let fd_listing = String::from_utf8(fd_bytes).unwrap();
+    let fd_entries: Vec<&str> = fd_listing.trim().split('\n').collect();
+    assert!(fd_entries.contains(&"0"));
+
+    session.walk(3, 4, &["0"]).unwrap();
+    session.open(4, 0).unwrap();
+    let read_fd_entry = session.read(4, 0, 256).unwrap();
+    assert_eq!(read_fd_entry.msg_type, RREAD);
+    let mut cursor = Cursor::new(read_fd_entry.body.as_slice());
+    let len = decode_u32(&mut cursor).unwrap();
+    let mut entry_buf = vec![0; len as usize];
+    cursor.read_exact(&mut entry_buf).unwrap();
+    let entry_str = String::from_utf8(entry_buf).unwrap();
+    assert!(entry_str.contains("fd "));
+
+    // task directory + self entry
+    let walk_task = session.walk(1, 5, &[&self_pid, "task"]).unwrap();
+    assert_eq!(walk_task.msg_type, RWALK);
+    session.open(5, 0).unwrap();
+    let dir_task = session.read(5, 0, 4096).unwrap();
+    assert_eq!(dir_task.msg_type, RREAD);
+    let mut cursor = Cursor::new(dir_task.body.as_slice());
+    let len = decode_u32(&mut cursor).unwrap();
+    let mut task_bytes = vec![0; len as usize];
+    cursor.read_exact(&mut task_bytes).unwrap();
+    let task_listing = String::from_utf8(task_bytes).unwrap();
+    let task_entries: Vec<&str> = task_listing.trim().split('\n').collect();
+    assert!(task_entries.contains(&"self"));
+
+    session.walk(5, 6, &["self"]).unwrap();
+    session.open(6, 0).unwrap();
+    let read_task_entry = session.read(6, 0, 512).unwrap();
+    assert_eq!(read_task_entry.msg_type, RREAD);
+    let mut cursor = Cursor::new(read_task_entry.body.as_slice());
+    let len = decode_u32(&mut cursor).unwrap();
+    let mut task_buf = vec![0; len as usize];
+    cursor.read_exact(&mut task_buf).unwrap();
+    let task_str = String::from_utf8(task_buf).unwrap();
+    assert!(task_str.contains(&format!("Pid: {}", self_pid)));
+
+    // statm
+    session.walk(1, 7, &[&self_pid, "statm"]).unwrap();
+    session.open(7, 0).unwrap();
+    let read_statm = session.read(7, 0, 256).unwrap();
+    assert_eq!(read_statm.msg_type, RREAD);
+    let mut cursor = Cursor::new(read_statm.body.as_slice());
+    let len = decode_u32(&mut cursor).unwrap();
+    let mut statm_buf = vec![0; len as usize];
+    cursor.read_exact(&mut statm_buf).unwrap();
+    let statm_str = String::from_utf8(statm_buf).unwrap();
+    assert!(statm_str.split(' ').count() >= 6);
+
+    // mounts
+    session.walk(1, 8, &[&self_pid, "mounts"]).unwrap();
+    session.open(8, 0).unwrap();
+    let read_mounts = session.read(8, 0, 4096).unwrap();
+    assert_eq!(read_mounts.msg_type, RREAD);
+    let mut cursor = Cursor::new(read_mounts.body.as_slice());
+    let len = decode_u32(&mut cursor).unwrap();
+    let mut mounts_buf = vec![0; len as usize];
+    cursor.read_exact(&mut mounts_buf).unwrap();
+    let mounts_str = String::from_utf8(mounts_buf).unwrap();
+    assert!(!mounts_str.is_empty());
+
     // Walk to self/status
     let walk_response = session.walk(1, 2, &[&self_pid, "status"]).unwrap();
     assert_eq!(walk_response.msg_type, RWALK);
