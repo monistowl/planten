@@ -21,6 +21,7 @@ Plan 9/QEMU harness
 - The new `tools/plan9-qemu/ci-runner.sh` script wraps `run.sh`, waits for the guest’s 9P port, runs `cargo run -p plan9_qemu_client --quiet`, and cleans up the VM; use it as the first gate in any Plan 9 QEMU-based CI job.
 - Pass `PLAN9_DISTRO=plan9` (or override `PLAN9_ISO_URL`/`PLAN9_ISO_SHA256`) if you’d rather test against vanilla Plan 9 instead of 9front.
 - Run `tools/plan9-qemu/apply-ns.sh` after generating `~/.planten/ns.json`; it shares the namespace JSON into the guest so you can replay it via `10_ns`/`nsctl` inside the actual 9front instance.
+- Use `tools/plan9-qemu/replay-ns.sh` to automate the guest-side replay: it starts QEMU with the shared namespace JSON, logs in via `expect`, mounts the shared directory, copies the JSON, runs `nsctl`, and shuts down the guest. Ensure `expect` is installed before invoking the script (the CI workflow already installs it).
 
 Namespace state is now serialized to `~/.planten/ns.json` (with `/srv/planten/ns.json` as a fallback when `$HOME` isn’t available), so each `10_ns`, `bind`, `mount`, and `nsctl` invocation reads/writes the same ordered mount list.
 

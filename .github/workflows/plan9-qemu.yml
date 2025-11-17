@@ -18,10 +18,10 @@ jobs:
           path: tools/plan9-qemu/.plan9
           key: plan9-qemu-${{ runner.os }}-9front-10931
 
-      - name: Install qemu + python3
+      - name: Install qemu + python3 + expect
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 python3
+          sudo apt-get install -y qemu-system-x86 python3 expect
 
       - name: Setup Plan 9 image
         run: |
