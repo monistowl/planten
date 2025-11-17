@@ -29,7 +29,10 @@ and defines the `RawMessage` helpers used by both clients and the RAMFS server. 
 shared protocol layer between the kernel, libs, and userland. `planten_fs_ramfs` exposes a threaded
 9P server (listening on `127.0.0.1:5640`) and implements all standard requests: reads, writes,
 stat, twstat, remove, clone, flush, and error handling. `tools/capture_golden` drives the same
-server programmatically and stores golden frames under `tests/golden_traces`.
+server programmatically and stores golden frames under `tests/golden_traces`. `planten_fs_net` mirrors
+the host networking stack by serving `/net/interfaces`, `/net/tcp`, and `/net/udp`, sourcing data
+from `/sys/class/net` and `/proc/net` so `/net` becomes another FsServer-backed tree alongside
+RAMFS and ProcFS.
 
 ## Userspace and tooling
 
