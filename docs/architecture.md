@@ -34,7 +34,9 @@ the host networking stack by serving `/net/interfaces`, `/net/tcp`, and `/net/ud
 from `/sys/class/net` and `/proc/net` so `/net` becomes another FsServer-backed tree alongside
 RAMFS and ProcFS. `planten_fs_dev` exposes `/dev/null`, `/dev/zero`, `/dev/random`, and `/dev/console`
 so namespaces can interact with those classic devices via 9P, and `docs/pseudofs-workflow.md` details
-how to capture and replay traces for these pseudo-filesystems.
+how to capture and replay traces for these pseudo-filesystems. `planten_fs_srv` mirrors `/srv` by listing
+service directories and serving a `ctl` file per entry, giving namespaces a consistent service mount
+path that can point at local or remote servers via the same 9P interface.
 
 ## Userspace and tooling
 

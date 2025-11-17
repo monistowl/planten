@@ -1,0 +1,8 @@
+[package]
+name = "planten_fs_srv"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+planten_fs_core = { path = "../planten_fs_core" }
+tempfile = "3.3"
