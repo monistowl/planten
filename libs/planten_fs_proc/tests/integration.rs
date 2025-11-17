@@ -75,14 +75,32 @@ fn read_procfs() {
     let read_response = session.read(1, 0, 4096).unwrap();
     assert_eq!(read_response.msg_type, RREAD);
 
-    let mut cursor = Cursor::new(read_response.body.as_slice());
-    let len = decode_u32(&mut cursor).unwrap();
-    let mut pids_bytes = vec![0; len as usize];
-    cursor.read_exact(&mut pids_bytes).unwrap();
-    let pids_str = String::from_utf8(pids_bytes).unwrap();
-    let pids: Vec<&str> = pids_str.trim().split('\n').collect();
     let self_pid = std::process::id().to_string();
-    assert!(pids.contains(&self_pid.as_str()));
+    let mut offset = 0u64;
+    let mut found = false;
+    loop {
+        let read_response = session.read(1, offset, 4096).unwrap();
+        assert_eq!(read_response.msg_type, RREAD);
+
+        let mut cursor = Cursor::new(read_response.body.as_slice());
+        let len = decode_u32(&mut cursor).unwrap();
+        if len == 0 {
+            break;
+        }
+        let mut pids_bytes = vec![0; len as usize];
+        cursor.read_exact(&mut pids_bytes).unwrap();
+        let pids_str = String::from_utf8(pids_bytes).unwrap();
+        let pids: Vec<&str> = pids_str.trim().split('\n').collect();
+
+        if pids.contains(&self_pid.as_str()) {
+            found = true;
+            break;
+        }
+
+        offset += len as u64;
+    }
+
+    assert!(found);
 
     // Walk to self/status
     let walk_response = session.walk(1, 2, &[&self_pid, "status"]).unwrap();
@@ -99,7 +117,7 @@ fn read_procfs() {
     let mut status_bytes = vec![0; len as usize];
     cursor.read_exact(&mut status_bytes).unwrap();
     let status_str = String::from_utf8(status_bytes).unwrap();
-    assert!(status_str.contains(&format!("pid {}", self_pid)));
+    assert!(status_str.contains(&format!("Pid: {}", self_pid)));
 
     drop(session);
     server_thread.join().unwrap();
