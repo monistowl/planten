@@ -167,16 +167,26 @@ mod tests {
     use std::env;
 
     use std::fs;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
     use tempfile::tempdir;
 
-    fn setup_home(tmp: &tempfile::TempDir) {
-        unsafe { env::set_var("HOME", tmp.path()) };
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn setup_home(tmp: &tempfile::TempDir) -> MutexGuard<'static, ()> {
+        let guard = ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env mutex poisoned");
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
+        guard
     }
 
     #[test]
     fn storage_path_prefers_home() {
         let tmp = tempdir().unwrap();
-        setup_home(&tmp);
+        let _env_guard = setup_home(&tmp);
         let storage = Namespace::storage_path().unwrap();
         assert!(storage.ends_with(".planten/ns.json"));
         assert!(storage.starts_with(tmp.path()));
@@ -185,7 +195,7 @@ mod tests {
     #[test]
     fn save_and_load_round_trip_preserves_order() {
         let tmp = tempdir().unwrap();
-        setup_home(&tmp);
+        let _env_guard = setup_home(&tmp);
         let mut ns = Namespace::new();
         ns.bind("/a", "/old");
         ns.union("/union", "/first");
@@ -193,7 +203,9 @@ mod tests {
         ns.p9("/p9", "host", "/path");
         let storage_path_before = Namespace::storage_path().unwrap();
         ns.save_to_storage().unwrap();
-        setup_home(&tmp);
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
         let storage_path_after = Namespace::storage_path().unwrap();
         assert_eq!(storage_path_before, storage_path_after);
         let contents = fs::read_to_string(&storage_path_after).unwrap();
