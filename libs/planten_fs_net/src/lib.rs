@@ -8,8 +8,10 @@ const NET_ENTRIES: &[&str] = &["interfaces", "tcp", "udp"];
 
 pub struct NetFs;
 
+pub mod server;
+
 impl NetFs {
-    fn list_entries() -> Vec<String> {
+    pub fn entries() -> Vec<String> {
         NET_ENTRIES.iter().map(|v| v.to_string()).collect()
     }
 
@@ -49,7 +51,7 @@ impl FsServer for NetFs {
     fn walk(&self, path: &str) -> Option<Vec<String>> {
         let comps: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
         match comps.as_slice() {
-            [] => Some(Self::list_entries()),
+            [] => Some(Self::entries()),
             [name] if NET_ENTRIES.contains(name) => Some(vec![]),
             _ => None,
         }
@@ -68,7 +70,7 @@ impl FsServer for NetFs {
         let comps: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
         match comps.as_slice() {
             [] => {
-                let entries = Self::list_entries();
+                let entries = Self::entries();
                 Some(entries.join("\n").to_string().into_bytes())
             }
             [name] if NET_ENTRIES.contains(name) => Self::read_entry(name).ok(),
@@ -126,8 +128,8 @@ mod tests {
 
     #[test]
     fn list_entries() {
-        let net = NetFs;
-        let entries = NetFs::list_entries();
+        let _net = NetFs;
+        let entries = NetFs::entries();
         assert!(entries.contains(&"tcp".to_string()));
         assert!(entries.contains(&"udp".to_string()));
     }

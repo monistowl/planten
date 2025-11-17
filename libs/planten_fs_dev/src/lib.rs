@@ -43,6 +43,12 @@ impl DevFile {
 
 pub struct DevFs;
 
+impl DevFs {
+    pub fn entries() -> Vec<String> {
+        DEV_ENTRIES.iter().map(|s| s.to_string()).collect()
+    }
+}
+
 fn now() -> u32 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -129,6 +135,8 @@ impl FsServer for DevFs {
         None
     }
 }
+
+pub mod server;
 
 #[cfg(test)]
 mod tests {

@@ -1,0 +1,8 @@
+[package]
+name = "capture_netfs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+planten_9p = { path = "../../libs/planten_9p" }
+planten_fs_net = { path = "../../libs/planten_fs_net" }

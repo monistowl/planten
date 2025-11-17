@@ -1,0 +1,9 @@
+[package]
+name = "capture_srvfs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+planten_9p = { path = "../../libs/planten_9p" }
+planten_fs_srv = { path = "../../libs/planten_fs_srv" }
+tempfile = "3"
