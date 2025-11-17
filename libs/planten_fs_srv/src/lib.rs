@@ -32,6 +32,12 @@ fn read_service_ctls(root: &Path, name: &str) -> io::Result<Vec<u8>> {
 pub struct SrvFs;
 
 impl SrvFs {
+    pub fn new() -> Self {
+        SrvFs
+    }
+}
+
+impl SrvFs {
     fn list_services(&self) -> Vec<String> {
         let root = srv_root();
         match fs::read_dir(&root) {
@@ -155,6 +161,8 @@ impl FsServer for SrvFs {
         None
     }
 }
+
+pub mod server;
 
 #[cfg(test)]
 mod tests {

@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 planten_fs_core = { path = "../planten_fs_core" }
 tempfile = "3.3"
+planten_9p = { path = "../planten_9p" }

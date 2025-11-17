@@ -24,6 +24,8 @@ pub struct Namespace {
 
 pub const PROCFS_TARGET: &str = "/proc";
 pub const PROCFS_ADDR: &str = "127.0.0.1:5641";
+pub const SRVFS_TARGET: &str = "/srv";
+pub const SRVFS_ADDR: &str = "127.0.0.1:5652";
 
 #[derive(Debug)]
 pub enum MountPlan {
@@ -129,6 +131,19 @@ impl Namespace {
             PROCFS_TARGET,
             Mount::P9 {
                 addr: PROCFS_ADDR.to_string(),
+                path: "".to_string(),
+            },
+        );
+    }
+
+    pub fn ensure_srvfs(&mut self) {
+        if self.mounts.iter().any(|entry| entry.target == SRVFS_TARGET) {
+            return;
+        }
+        self.add_mount_entry(
+            SRVFS_TARGET,
+            Mount::P9 {
+                addr: SRVFS_ADDR.to_string(),
                 path: "".to_string(),
             },
         );

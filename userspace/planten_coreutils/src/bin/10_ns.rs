@@ -8,7 +8,9 @@ use planten_9p::P9Client;
 #[cfg(target_os = "linux")]
 use planten_fs_proc::{fs::ProcFs, server};
 #[cfg(target_os = "linux")]
-use planten_ns::{MountPlan, Namespace, PROCFS_ADDR};
+use planten_fs_srv::{SrvFs, server as srv_server};
+#[cfg(target_os = "linux")]
+use planten_ns::{MountPlan, Namespace, PROCFS_ADDR, SRVFS_ADDR};
 use std::collections::HashMap;
 use std::env;
 use std::ffi::CString;
@@ -30,6 +32,8 @@ use tempfile::tempdir;
 fn main() {
     #[cfg(target_os = "linux")]
     let _procfs_server = start_procfs_server();
+    #[cfg(target_os = "linux")]
+    let _srvfs_server = start_srvfs_server();
 
     let args: Vec<String> = env::args().collect();
     let mut ns = match Namespace::load_from_storage() {
@@ -44,7 +48,10 @@ fn main() {
     };
 
     #[cfg(target_os = "linux")]
-    ns.ensure_procfs();
+    {
+        ns.ensure_procfs();
+        ns.ensure_srvfs();
+    }
 
     let mut i = 1;
     while i < args.len() {
@@ -402,6 +409,25 @@ fn start_procfs_server() -> Option<thread::JoinHandle<()>> {
         }
         Err(err) => {
             eprintln!("Failed to bind ProcFS server {}: {}", PROCFS_ADDR, err);
+            None
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn start_srvfs_server() -> Option<thread::JoinHandle<()>> {
+    match TcpListener::bind(SRVFS_ADDR) {
+        Ok(listener) => {
+            let srvfs = Arc::new(Mutex::new(SrvFs::new()));
+            let handle = thread::spawn(move || {
+                if let Err(err) = srv_server::run_server(listener, srvfs) {
+                    eprintln!("SrvFS server error: {}", err);
+                }
+            });
+            Some(handle)
+        }
+        Err(err) => {
+            eprintln!("Failed to bind SrvFS server {}: {}", SRVFS_ADDR, err);
             None
         }
     }

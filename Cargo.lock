@@ -397,6 +397,7 @@ dependencies = [
 name = "planten_fs_srv"
 version = "0.1.0"
 dependencies = [
+ "planten_9p",
  "planten_fs_core",
  "tempfile",
 ]
