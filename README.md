@@ -18,6 +18,7 @@ planten is a work-in-progress Rust reimagining of Plan 9/9front: namespaces, 9P 
 - Regenerate RAMFS golden traces with `cargo run -p capture_golden` whenever 9P semantics change; the binaries land under `tests/golden_traces` and are replayed by the RAMFS and ProcFS suites.
 - Use `cargo run -p capture_procfs` or the appropriate `tools/capture_*` helper when ProcFS, NetFS, DevFS, or SrvFS behaviors evolve; each tool records deterministic request/response pairs under `tests/proc_golden` or similar directories described in `docs/pseudofs-workflow.md`.
 - After updating golden data, rerun `cargo test --workspace` and the relevant integration suites so the replay helpers still match the new behavior.
+- The CI workflow now reruns every capture helper (`capture_procfs`, `capture_netfs`, `capture_devfs`, `capture_srvfs`) and fails if any `tests/*_golden` directory diverges, so keep those fixtures up to date when modifying pseudo-filesystems.
 
 ### Testing and verification
 - Run `cargo test --workspace` to exercise unit, integration, and golden-replay suites; some crates (`planten_fs_dev`, `planten_fs_net`, `planten_fs_srv`) include their own coverage targeting the newly captured traces.

@@ -31,6 +31,14 @@ jobs:
     - name: Test all workspace members
       run: cargo test --workspace --verbose
 
+    - name: Refresh pseudo-fs golden traces
+      run: |
+        cargo run -p capture_procfs
+        cargo run -p capture_netfs
+        cargo run -p capture_devfs
+        cargo run -p capture_srvfs
+        git diff --exit-code tests/proc_golden tests/net_golden tests/dev_golden tests/srv_golden
+
     - name: Build kernel
       run: cargo bootimage
       working-directory: kernel/planten_kernel
