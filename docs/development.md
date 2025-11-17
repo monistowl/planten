@@ -16,4 +16,5 @@
 
 - Regenerate the golden request/response sequences after any change that affects the RAMFS 9P protocol by running `cargo run -p capture_golden`.
 - `tools/capture_golden` starts an in-memory RAMFS server (`libs/planten_fs_ramfs::server`) and captures each request/response pair, writing them to `tests/golden_traces/*.bin`. Commit the updated binaries together with code changes so `tests/proc_client` and other suites stay in sync.
+- Pseudo-filesystems such as ProcFS, NetFS, DevFS, and SrvFS follow the same capture pattern; run the corresponding `tools/capture_*` helper (e.g., `cargo run -p capture_procfs`) so `tests/proc_golden` and similar fixtures stay aligned with the live servers described in `docs/pseudofs-workflow.md`.
 - When golden traces change, rerun `cargo test --workspace` to make sure the replayed sequences still match the new outputs and there are no regressions.
