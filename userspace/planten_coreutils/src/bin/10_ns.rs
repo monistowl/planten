@@ -217,17 +217,13 @@ fn main() {
                                 }
                             }
                             MountPlan::P9 { addr, path } => {
-                                if let Err(err) =
-                                    probe_remote_share(addr.as_str(), path.as_str())
-                                {
+                                if let Err(err) = probe_remote_share(addr.as_str(), path.as_str()) {
                                     eprintln!("Failed to probe 9P {}@{}: {}", path, addr, err);
                                     continue;
                                 }
-                                if let Err(e) = mount_9p_target(
-                                    new.as_str(),
-                                    addr.as_str(),
-                                    path.as_str(),
-                                ) {
+                                if let Err(e) =
+                                    mount_9p_target(new.as_str(), addr.as_str(), path.as_str())
+                                {
                                     eprintln!(
                                         "Failed to mount 9P {}@{} onto {}: {}",
                                         path, addr, new, e

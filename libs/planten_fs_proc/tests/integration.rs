@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use planten_9p::{
-    build_frame, decode_u32, encode_attach_body, encode_open_body, encode_read_body,
-    encode_version_body, encode_walk_body, messages::*, RawMessage,
+    RawMessage, build_frame, decode_u32, encode_attach_body, encode_open_body, encode_read_body,
+    encode_version_body, encode_walk_body, messages::*,
 };
 use planten_fs_proc::fs::ProcFs;
 use planten_fs_proc::server;
@@ -64,8 +64,7 @@ fn read_procfs() {
     let (listener, procfs) = setup_procfs_server();
     let addr = listener.local_addr().unwrap();
     let server_procfs = Arc::clone(&procfs);
-    let server_thread =
-        thread::spawn(move || server::run_single(listener, server_procfs).unwrap());
+    let server_thread = thread::spawn(move || server::run_single(listener, server_procfs).unwrap());
 
     let mut session = TestSession::connect(&addr.to_string()).unwrap();
     session.handshake().unwrap();
@@ -105,4 +104,3 @@ fn read_procfs() {
     drop(session);
     server_thread.join().unwrap();
 }
-

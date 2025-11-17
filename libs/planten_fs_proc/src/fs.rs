@@ -39,10 +39,7 @@ impl ProcFs {
                 return Ok(line.into_bytes());
             }
         }
-        Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "process not found",
-        ))
+        Err(io::Error::new(io::ErrorKind::NotFound, "process not found"))
     }
 
     fn read_status(&self, pid_str: &str) -> io::Result<Vec<u8>> {
@@ -59,10 +56,7 @@ impl ProcFs {
                 return Ok(status.into_bytes());
             }
         }
-        Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "process not found",
-        ))
+        Err(io::Error::new(io::ErrorKind::NotFound, "process not found"))
     }
 
     fn directory_listing(&self, entries: &[String]) -> Vec<u8> {

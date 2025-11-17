@@ -3,11 +3,11 @@ use std::io::{Cursor, Read};
 use std::path::PathBuf;
 
 use planten_9p::RawMessage;
-use planten_9p::{decode_qid, decode_stat};
 use planten_9p::messages::{
     RATTACH, RAUTH, RCLONE, RERROR, RFLUSH, ROPEN, RREAD, RREMOVE, RSTAT, RVERSION, RWALK, RWRITE,
-    TATTACH, TAUTH, TCLONE, TFLUSH, TREAD, TREMOVE, TSTAT, TVERSION, TWALK, TWSTAT, RWSTAT,
+    RWSTAT, TATTACH, TAUTH, TCLONE, TFLUSH, TREAD, TREMOVE, TSTAT, TVERSION, TWALK, TWSTAT,
 };
+use planten_9p::{decode_qid, decode_stat};
 
 fn read_u16(cursor: &mut Cursor<&[u8]>) -> u16 {
     let mut buf = [0u8; 2];
