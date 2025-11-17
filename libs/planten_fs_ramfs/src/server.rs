@@ -6,20 +6,22 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use planten_9p::{build_frame, messages::*, RawMessage};
-use planten_fs_core::FsServer;
+use planten_9p::{
+    Qid, RawMessage, Stat, build_frame, encode_qid_bytes, encode_stat_payload, messages::*,
+};
+use planten_fs_core::{FsServer, Inode};
 
 use crate::RamFs;
 
 #[derive(Clone)]
 struct FidState {
     path: String,
-    qid: [u8; 13],
+    qid: Qid,
     open_mode: Option<u8>,
 }
 
 impl FidState {
-    fn new(path: String, qid: [u8; 13]) -> Self {
+    fn new(path: String, qid: Qid) -> Self {
         FidState {
             path,
             qid,
@@ -66,7 +68,13 @@ pub fn handle_client(mut stream: TcpStream, ramfs: Arc<Mutex<RamFs>>) -> io::Res
 
         match message.msg_type {
             TVERSION => handle_version(&mut stream, message.tag, &message.body)?,
-            TATTACH => handle_attach(&mut stream, message.tag, &message.body, &mut fid_states)?,
+            TATTACH => handle_attach(
+                &mut stream,
+                message.tag,
+                &message.body,
+                &mut fid_states,
+                &ramfs,
+            )?,
             TWALK => handle_walk(
                 &mut stream,
                 message.tag,
@@ -138,10 +146,13 @@ fn handle_create(
         }
     };
 
-    let new_path = resolve_step(path, &name).unwrap();
+    let new_path = match resolve_step(path, &name) {
+        Some(p) => p,
+        None => return send_error(stream, tag, "invalid target path"),
+    };
 
     let mut guard = ramfs.lock().unwrap();
-    if guard.read_file(&new_path).is_some() || guard.list_dir(&new_path).is_some() {
+    if guard.stat(&new_path).is_some() {
         return send_error(stream, tag, "file exists");
     }
 
@@ -152,8 +163,11 @@ fn handle_create(
         guard.create_file(&new_path, &[]);
     }
 
+    let inode = guard.stat(&new_path).unwrap();
+    let qid = qid_from_inode(&new_path, &inode);
+
     let mut response = Vec::new();
-    response.extend_from_slice(&encode_qid(&new_path));
+    response.extend_from_slice(&encode_qid_bytes(&qid));
     response.extend_from_slice(&0u32.to_le_bytes());
     send_response(stream, RCREATE, tag, &response)
 }
@@ -200,22 +214,11 @@ fn handle_stat(
     let guard = ramfs.lock().unwrap();
     let inode = match guard.stat(path) {
         Some(inode) => inode,
-        None => {
-            return send_error(stream, tag, "file not found");
-        }
+        None => return send_error(stream, tag, "file not found"),
     };
-
-    let stat = build_stat(
-        &inode.name,
-        inode.data.len() as u64,
-        inode.mode,
-        &inode.uid,
-        &inode.gid,
-        inode.atime,
-        inode.mtime,
-    );
-
-    send_response(stream, RSTAT, tag, &stat)
+    let stat = inode_to_stat(path, &inode);
+    let payload = encode_stat_payload(&stat);
+    send_response(stream, RSTAT, tag, &payload)
 }
 
 fn handle_version(stream: &mut TcpStream, tag: u16, body: &[u8]) -> io::Result<()> {
@@ -231,6 +234,7 @@ fn handle_attach(
     tag: u16,
     body: &[u8],
     fid_states: &mut HashMap<u32, FidState>,
+    ramfs: &Arc<Mutex<RamFs>>,
 ) -> io::Result<()> {
     let mut cursor = Cursor::new(body);
     let fid = read_u32(&mut cursor)?;
@@ -238,10 +242,18 @@ fn handle_attach(
     let _uname = read_string(&mut cursor)?;
     let _aname = read_string(&mut cursor)?;
     let root_path = "/".to_string();
-    let root_qid = encode_qid(&root_path);
-    fid_states.insert(fid, FidState::new(root_path.clone(), root_qid));
+    let guard = ramfs.lock().unwrap();
+    let root_inode = match guard.stat(&root_path) {
+        Some(inode) => inode,
+        None => {
+            return send_error(stream, tag, "root missing");
+        }
+    };
+    let root_qid = qid_from_inode(&root_path, &root_inode);
+    drop(guard);
+    fid_states.insert(fid, FidState::new(root_path.clone(), root_qid.clone()));
     let mut response = Vec::new();
-    response.extend_from_slice(&encode_qid("/"));
+    response.extend_from_slice(&encode_qid_bytes(&root_qid));
     send_response(stream, RATTACH, tag, &response)
 }
 
@@ -257,20 +269,21 @@ fn handle_walk(
     let newfid = read_u32(&mut cursor)?;
     let nwname = read_u16(&mut cursor)?;
 
-    let base_state = fid_states
-        .get(&fid)
-        .cloned()
-        .unwrap_or_else(|| FidState::new("/".to_string(), encode_qid("/")));
+    let base_state = fid_states.get(&fid).cloned().unwrap_or_else(|| {
+        let root_inode = ramfs.lock().unwrap().stat("/").expect("root should exist");
+        FidState::new("/".to_string(), qid_from_inode("/", &root_inode))
+    });
     let mut current_path = base_state.path.clone();
-    let mut qids: Vec<[u8; 13]> = Vec::new();
+    let mut qids: Vec<Qid> = Vec::new();
+    let guard = ramfs.lock().unwrap();
 
     for _ in 0..nwname {
         let name = read_string(&mut cursor)?;
         match resolve_step(&current_path, &name) {
             Some(next_path) => {
-                if path_exists(&next_path, ramfs) {
+                if let Some(inode) = guard.stat(&next_path) {
                     current_path = next_path.clone();
-                    qids.push(encode_qid(&next_path));
+                    qids.push(qid_from_inode(&next_path, &inode));
                 } else {
                     return send_error(
                         stream,
@@ -289,13 +302,20 @@ fn handle_walk(
         }
     }
 
-    let new_qid = qids.last().copied().unwrap_or(base_state.qid);
+    let new_qid = if let Some(last) = qids.last().cloned() {
+        last
+    } else if let Some(inode) = guard.stat(&current_path) {
+        qid_from_inode(&current_path, &inode)
+    } else {
+        return send_error(stream, tag, "walk failed: target missing");
+    };
+    drop(guard);
     fid_states.insert(newfid, FidState::new(current_path.clone(), new_qid));
 
     let mut response = Vec::new();
     response.extend_from_slice(&(qids.len() as u16).to_le_bytes());
     for qid in qids {
-        response.extend_from_slice(&qid);
+        response.extend_from_slice(&encode_qid_bytes(&qid));
     }
     send_response(stream, RWALK, tag, &response)
 }
@@ -316,16 +336,22 @@ fn handle_open(
         None => return send_error(stream, tag, "unknown fid"),
     };
 
-    if !path_exists(path.as_str(), ramfs) {
-        return send_error(stream, tag, "file not found");
-    }
+    let inode = {
+        let guard = ramfs.lock().unwrap();
+        guard.stat(&path)
+    };
+
+    let inode = match inode {
+        Some(inode) => inode,
+        None => return send_error(stream, tag, "file not found"),
+    };
 
     let state = fid_states.get_mut(&fid).unwrap();
-    state.qid = encode_qid(path.as_str());
+    state.qid = qid_from_inode(&path, &inode);
     state.open_mode = Some(_mode);
 
     let mut response = Vec::new();
-    response.extend_from_slice(&state.qid);
+    response.extend_from_slice(&encode_qid_bytes(&state.qid));
     response.extend_from_slice(&0u32.to_le_bytes());
     send_response(stream, ROPEN, tag, &response)
 }
@@ -359,30 +385,43 @@ fn handle_read(
     let path = state.path.clone();
     let data = {
         let guard = ramfs.lock().unwrap();
-        if let Some(bytes) = guard.read_file(&path) {
-            Some(bytes.to_vec())
-        } else if let Some(entries) = guard.list_dir(&path) {
-            let joined = entries.join("\n") + "\n";
-            Some(joined.into_bytes())
-        } else {
-            None
+        match guard.stat(&path) {
+            Some(inode) if inode.mode & 0x80000000 != 0 => {
+                let mut dir_bytes = Vec::new();
+                if let Some(entries) = guard.list_dir(&path) {
+                    for entry in entries {
+                        if let Some(child_path) = resolve_step(&path, &entry) {
+                            if let Some(child_inode) = guard.stat(&child_path) {
+                                let child_stat = inode_to_stat(&child_path, &child_inode);
+                                dir_bytes.extend_from_slice(&encode_stat_payload(&child_stat));
+                            }
+                        }
+                    }
+                }
+                dir_bytes
+            }
+            Some(_) => {
+                if let Some(bytes) = guard.read_file(&path) {
+                    bytes.to_vec()
+                } else {
+                    return send_error(stream, tag, "file missing during read");
+                }
+            }
+            None => return send_error(stream, tag, "file not found"),
         }
     };
 
-    let data = match data {
-        Some(buf) => {
-            let start = std::cmp::min(offset as usize, buf.len());
-            let end = std::cmp::min(start + count as usize, buf.len());
-            buf[start..end].to_vec()
-        }
-        None => {
-            return send_error(stream, tag, "cannot read directory or missing file");
-        }
+    let start = offset as usize;
+    let end = std::cmp::min(start + count as usize, data.len());
+    let chunk = if start >= data.len() {
+        Vec::new()
+    } else {
+        data[start..end].to_vec()
     };
 
     let mut response = Vec::new();
-    response.extend_from_slice(&(data.len() as u32).to_le_bytes());
-    response.extend_from_slice(&data);
+    response.extend_from_slice(&(chunk.len() as u32).to_le_bytes());
+    response.extend_from_slice(&chunk);
     send_response(stream, RREAD, tag, &response)
 }
 
@@ -523,53 +562,37 @@ fn encode_error(message: &str) -> Vec<u8> {
     buf
 }
 
-fn encode_qid(path: &str) -> [u8; 13] {
+fn qid_from_inode(path: &str, inode: &Inode) -> Qid {
     let mut hasher = DefaultHasher::new();
     path.hash(&mut hasher);
+    inode.mtime.hash(&mut hasher);
     let path_id = hasher.finish();
 
-    let mut qid = [0u8; 13];
-    qid[0] = 0;
-    qid[1..5].copy_from_slice(&0u32.to_le_bytes());
-    qid[5..13].copy_from_slice(&path_id.to_le_bytes());
-    qid
+    Qid {
+        qtype: if inode.mode & 0x80000000 != 0 {
+            0x80
+        } else {
+            0x00
+        },
+        version: inode.mtime,
+        path: path_id,
+    }
 }
 
-fn build_stat(
-    name: &str,
-    length: u64,
-    mode: u32,
-    uid: &str,
-    gid: &str,
-    atime: u32,
-    mtime: u32,
-) -> Vec<u8> {
-    let mut buf = Vec::new();
-    let qid = encode_qid(name);
-    let stat = vec![
-        0u16.to_le_bytes().to_vec(), // type
-        0u32.to_le_bytes().to_vec(), // dev
-        qid.to_vec(),
-        mode.to_le_bytes().to_vec(),
-        atime.to_le_bytes().to_vec(),
-        mtime.to_le_bytes().to_vec(),
-        length.to_le_bytes().to_vec(),
-        encode_string_as_bytes(name),
-        encode_string_as_bytes(uid),
-        encode_string_as_bytes(gid),
-        encode_string_as_bytes(uid), // muid
-    ];
-    let stat_bytes: Vec<u8> = stat.into_iter().flatten().collect();
-    buf.extend_from_slice(&(stat_bytes.len() as u16).to_le_bytes());
-    buf.extend_from_slice(&stat_bytes);
-    buf
-}
-
-fn encode_string_as_bytes(s: &str) -> Vec<u8> {
-    let mut buf = Vec::new();
-    buf.extend_from_slice(&(s.len() as u16).to_le_bytes());
-    buf.extend_from_slice(s.as_bytes());
-    buf
+fn inode_to_stat(path: &str, inode: &Inode) -> Stat {
+    Stat {
+        type_: 0,
+        dev: 0,
+        qid: qid_from_inode(path, inode),
+        mode: inode.mode,
+        atime: inode.atime,
+        mtime: inode.mtime,
+        length: inode.data.len() as u64,
+        name: inode.name.clone(),
+        uid: inode.uid.clone(),
+        gid: inode.gid.clone(),
+        muid: inode.uid.clone(),
+    }
 }
 
 fn mode_allows_read(mode: u8) -> bool {
@@ -579,11 +602,6 @@ fn mode_allows_read(mode: u8) -> bool {
 fn mode_allows_write(mode: u8) -> bool {
     let typ = mode & 0x3;
     typ == 1 || typ == 2 || (mode & 0x10 != 0)
-}
-
-fn path_exists(path: &str, ramfs: &Arc<Mutex<RamFs>>) -> bool {
-    let guard = ramfs.lock().unwrap();
-    guard.read_file(path).is_some() || guard.list_dir(path).is_some()
 }
 
 fn resolve_step(base: &str, component: &str) -> Option<String> {

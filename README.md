@@ -3,6 +3,34 @@ yes really
 
 planten is a work-in-progress Rust reimagining of Plan 9/9front: namespaces, 9P servers, and a small userland that runs on top of existing OSes today while the kernel, devices, and tooling slowly evolve.
 
+## Setup
+
+1. **Install the pinned toolchain**: `rustup toolchain install nightly` and verify `rust-toolchain.toml` exists at the repo root; most scripts assume the same nightly release.
+2. **Fetch tooling**: run `cargo fetch` from the workspace root to populate dependencies before you start iterating.
+3. **Ensure helper scripts are executable** (e.g., `tools/check_cargo_bin.sh` and any `tools/plan9-qemu/*.sh`). They rely on the same nightly Rust toolchain, so run `cargo fmt`/`cargo clippy` after toolchain setup.
+4. **Generate fixtures**: golden-trace data lives in `tests/golden_traces`; regenerate them via `cargo run -p capture_golden` whenever 9P semantics change.
+5. **Verify locally**: Run `cargo test -p planten_fs_ramfs --test golden_integration` plus `cargo test --workspace` to exercise the namespace and filesystem suites.
+
+## CLI helpers
+
+- `cargo run -p planten_coreutils --bin 10_ns -- -b /tmp/example /etc` builds a fresh namespace and drops you into an rc-like shell that persists state to `~/.planten/ns.json`.
+- `cargo run -p planten_coreutils --bin bind`/`mount`/`nsctl` mutate the namespace that `10_ns` and the shell share.
+- The RAMFS server listens on `127.0.0.1:5640` (`cargo run -p planten_fs_ramfs --bin server`) and works with `10_ns -p9 /mnt/ramfs 127.0.0.1:5640 /`.
+
+## Documentation
+
+- [Architecture](docs/architecture.md) describes how `libs/`, `kernel/`, `userspace/`, and tooling interlock.
+- [Development](docs/development.md) covers the nightly toolchain, lint helpers, and golden-trace workflow.
+- [Plan 9/QEMU harness](docs/plan9-qemu.md) explains the QEMU scripts, distros, and CI runner.
+- [Compatibility matrix](docs/compatibility-matrix.md) lists supported targets and known gaps.
+
+## Plan 9/QEMU testing
+
+- `tools/plan9-qemu/setup.sh` downloads a 9front (or Plan 9) ISO, verifies its SHA256, and prepares a qcow2 disk.
+- `tools/plan9-qemu/run.sh` boots headlessly, forwards port `564→1564`, and exposes `serial`/`plan9share` helpers for the client.
+- `tools/plan9-qemu/ci-runner.sh` waits for the guest, runs `cargo run -p plan9_qemu_client --quiet`, and halts the VM for CI validation.
+- Copy `~/.planten/ns.json` into the guest via `apply-ns.sh`/`replay-ns.sh` to replay recorded namespaces inside the VM.
+
 Current status
 --------------
 - The `planten_ns` crate models bind/union/9P mounts and backs the `bind`, `mount`, `nsctl`, and `10_ns` helpers so you can compose per-process namespaces and launch binaries inside them.

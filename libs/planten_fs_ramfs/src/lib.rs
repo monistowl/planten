@@ -1,4 +1,5 @@
 use planten_fs_core::{FsServer, Inode};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct RamFs {
     root: Inode,
@@ -97,7 +98,7 @@ impl RamFs {
         None
     }
 
-    pub fn list_dir(&self, path: &str) -> Option<Vec<&str>> {
+    pub fn list_dir(&self, path: &str) -> Option<Vec<String>> {
         let mut current = &self.root;
         let components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
         for component in components {
@@ -107,7 +108,9 @@ impl RamFs {
                 return None;
             }
         }
-        Some(current.children.keys().map(|s| s.as_str()).collect())
+        let mut entries: Vec<String> = current.children.keys().cloned().collect();
+        entries.sort();
+        Some(entries)
     }
 
     pub fn create_dir(&mut self, path: &str) {
@@ -132,7 +135,6 @@ impl RamFs {
 impl FsServer for RamFs {
     fn walk(&self, path: &str) -> Option<Vec<String>> {
         self.list_dir(path)
-            .map(|v| v.into_iter().map(|s| s.to_string()).collect())
     }
 
     fn open(&self, path: &str) -> Option<()> {
@@ -160,6 +162,7 @@ impl FsServer for RamFs {
             node.data.resize(end, 0);
         }
         node.data[start..end].copy_from_slice(data);
+        node.mtime = current_timestamp();
         Some(data.len() as u32)
     }
 
@@ -199,6 +202,13 @@ impl FsServer for RamFs {
     fn wstat(&mut self, _path: &str, _inode: Inode) -> Option<()> {
         Some(())
     }
+}
+
+fn current_timestamp() -> u32 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as u32
 }
 
 pub mod server;

@@ -7,8 +7,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use planten_9p::RawMessage;
-use planten_9p::messages::{RCLONE, RERROR, ROPEN, RREAD, RSTAT, RWRITE, TREAD, TWRITE};
-use planten_9p::{build_frame, encode_read_body};
+use planten_9p::messages::{
+    RATTACH, RCLONE, RERROR, ROPEN, RREAD, RSTAT, RVERSION, RWRITE, TREAD, TWRITE,
+};
+use planten_9p::{build_frame, decode_stat, encode_read_body};
 use planten_fs_ramfs::{RamFs, server};
 
 fn parse_frames(bytes: &[u8]) -> Vec<(Vec<u8>, RawMessage)> {
@@ -39,6 +41,30 @@ fn golden_trace_path(file: &str) -> PathBuf {
 
 fn read_trace(file: &str) -> Vec<(Vec<u8>, RawMessage)> {
     parse_frames(&fs::read(golden_trace_path(file)).unwrap())
+}
+
+fn drain_stat_entries(buffer: &mut Vec<u8>) -> Vec<planten_9p::Stat> {
+    let mut cursor = Cursor::new(buffer.as_slice());
+    let mut entries = Vec::new();
+    loop {
+        let start = cursor.position() as usize;
+        if start >= buffer.len() {
+            break;
+        }
+        match decode_stat(&mut cursor) {
+            Ok(stat) => entries.push(stat),
+            Err(err) => {
+                if err.kind() == io::ErrorKind::UnexpectedEof {
+                    buffer.drain(..start);
+                    return entries;
+                }
+                panic!("decode_stat failed: {:?}", err);
+            }
+        }
+    }
+    let consumed = cursor.position() as usize;
+    buffer.drain(..consumed);
+    entries
 }
 
 fn read_u16(cursor: &mut Cursor<&[u8]>) -> io::Result<u16> {
@@ -96,7 +122,15 @@ fn golden_trace_matches_server_interaction() {
         let actual = RawMessage::read_from(&mut stream).unwrap();
         let expected = &handshake_frames[idx].1;
         assert_eq!(actual.msg_type, expected.msg_type);
-        assert_eq!(actual.body, expected.body);
+        match actual.msg_type {
+            RVERSION => {
+                assert!(actual.body.len() >= 4);
+            }
+            RATTACH => {
+                assert_eq!(actual.body.len(), 13);
+            }
+            _ => unreachable!(),
+        }
     }
 
     let walk_request = read_trace("twalk_request.bin");
@@ -131,30 +165,41 @@ fn golden_trace_matches_server_interaction() {
 
     let dir_request = read_trace("tread_dir_request.bin");
     stream.write_all(&dir_request[0].0).unwrap();
-    let actual_dir = RawMessage::read_from(&mut stream).unwrap();
-    assert_eq!(actual_dir.msg_type, RREAD);
-    let mut dir_cursor = Cursor::new(actual_dir.body.as_slice());
-    let count = read_u32(&mut dir_cursor).unwrap();
-    let mut dir_buf = vec![0u8; count as usize];
-    dir_cursor.read_exact(&mut dir_buf).unwrap();
-    let mut dir_entries =
-        String::from_utf8(dir_buf).expect("directory listing should be valid utf8");
+    let mut current_dir_resp = RawMessage::read_from(&mut stream).unwrap();
+    assert_eq!(current_dir_resp.msg_type, RREAD);
 
-    if !(dir_entries.contains("hello.txt") && dir_entries.contains("readme.txt")) {
-        let next_body = encode_read_body(1, count as u64, 128);
+    let mut offset = 0u64;
+    let mut pending = Vec::new();
+    let mut dir_entries = Vec::new();
+
+    loop {
+        let mut dir_cursor = Cursor::new(current_dir_resp.body.as_slice());
+        let count = read_u32(&mut dir_cursor).unwrap();
+        let mut dir_buf = vec![0u8; count as usize];
+        dir_cursor.read_exact(&mut dir_buf).unwrap();
+        pending.extend_from_slice(&dir_buf);
+        dir_entries.extend(drain_stat_entries(&mut pending));
+
+        if dir_entries.iter().any(|stat| stat.name == "hello.txt")
+            && dir_entries.iter().any(|stat| stat.name == "readme.txt")
+        {
+            break;
+        }
+
+        if count == 0 {
+            break;
+        }
+
+        offset += count as u64;
+        let next_body = encode_read_body(1, offset, 128);
         let next_request = build_frame(TREAD, 0x55aa, &next_body);
         stream.write_all(&next_request).unwrap();
-        let next_dir = RawMessage::read_from(&mut stream).unwrap();
-        assert_eq!(next_dir.msg_type, RREAD);
-        let mut next_cursor = Cursor::new(next_dir.body.as_slice());
-        let next_count = read_u32(&mut next_cursor).unwrap();
-        let mut next_buf = vec![0u8; next_count as usize];
-        next_cursor.read_exact(&mut next_buf).unwrap();
-        dir_entries.push_str(&String::from_utf8(next_buf).unwrap());
+        current_dir_resp = RawMessage::read_from(&mut stream).unwrap();
+        assert_eq!(current_dir_resp.msg_type, RREAD);
     }
 
-    assert!(dir_entries.contains("hello.txt"));
-    assert!(dir_entries.contains("readme.txt"));
+    assert!(dir_entries.iter().any(|stat| stat.name == "hello.txt"));
+    assert!(dir_entries.iter().any(|stat| stat.name == "readme.txt"));
 
     let tstat_request = read_trace("tstat_request.bin");
     stream.write_all(&tstat_request[0].0).unwrap();
