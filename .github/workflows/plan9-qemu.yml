@@ -34,6 +34,48 @@ jobs:
         run: |
           tools/plan9-qemu/ci-runner.sh
 
+      - name: Generate namespace JSON
+        run: |
+          mkdir -p ~/.planten
+          cat <<'EOF' > ~/.planten/ns.json
+{
+  "mounts": [
+    {
+      "target": "/mnt/host",
+      "mount": {
+        "Bind": {
+          "path": "/tmp"
+        }
+      }
+    },
+    {
+      "target": "/union",
+      "mount": {
+        "Union": {
+          "paths": [
+            "/tmp",
+            "/etc"
+          ]
+        }
+      }
+    },
+    {
+      "target": "/srv/remote",
+      "mount": {
+        "P9": {
+          "addr": "127.0.0.1:1564",
+          "path": "/"
+        }
+      }
+    }
+  ]
+}
+EOF
+
+      - name: Replay namespace inside guest
+        run: |
+          tools/plan9-qemu/replay-ns.sh
+
       - name: Run rust checks
         run: |
           cargo check --workspace
