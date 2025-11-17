@@ -6,8 +6,9 @@ use nix::unistd::{ForkResult, execvp, fork};
 #[cfg(target_os = "linux")]
 use planten_9p::P9Client;
 #[cfg(target_os = "linux")]
-use planten_ns::MountPlan;
-use planten_ns::Namespace;
+use planten_fs_proc::{fs::ProcFs, server};
+#[cfg(target_os = "linux")]
+use planten_ns::{MountPlan, Namespace, PROCFS_ADDR};
 use std::collections::HashMap;
 use std::env;
 use std::ffi::CString;
@@ -15,12 +16,21 @@ use std::ffi::CString;
 use std::fs;
 use std::io::{self, Write};
 #[cfg(target_os = "linux")]
+use std::net::TcpListener;
+#[cfg(target_os = "linux")]
 use std::path::Path;
 use std::process::Command;
+#[cfg(target_os = "linux")]
+use std::sync::{Arc, Mutex};
+#[cfg(target_os = "linux")]
+use std::thread;
 #[cfg(target_os = "linux")]
 use tempfile::tempdir;
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    let _procfs_server = start_procfs_server();
+
     let args: Vec<String> = env::args().collect();
     let mut ns = match Namespace::load_from_storage() {
         Ok(namespace) => namespace,
@@ -32,6 +42,9 @@ fn main() {
             Namespace::new()
         }
     };
+
+    #[cfg(target_os = "linux")]
+    ns.ensure_procfs();
 
     let mut i = 1;
     while i < args.len() {
@@ -373,4 +386,23 @@ fn parse_9p_addr(addr: &str) -> Result<(String, u16), String> {
     }
 
     Ok((addr.to_string(), DEFAULT_9P_PORT))
+}
+
+#[cfg(target_os = "linux")]
+fn start_procfs_server() -> Option<thread::JoinHandle<()>> {
+    match TcpListener::bind(PROCFS_ADDR) {
+        Ok(listener) => {
+            let procfs = Arc::new(Mutex::new(ProcFs::new()));
+            let handle = thread::spawn(move || {
+                if let Err(err) = server::run_server(listener, procfs) {
+                    eprintln!("ProcFS server error: {}", err);
+                }
+            });
+            Some(handle)
+        }
+        Err(err) => {
+            eprintln!("Failed to bind ProcFS server {}: {}", PROCFS_ADDR, err);
+            None
+        }
+    }
 }

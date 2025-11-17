@@ -22,6 +22,9 @@ pub struct Namespace {
     mounts: Vec<MountEntry>,
 }
 
+pub const PROCFS_TARGET: &str = "/proc";
+pub const PROCFS_ADDR: &str = "127.0.0.1:5641";
+
 #[derive(Debug)]
 pub enum MountPlan {
     Bind { path: String },
@@ -112,6 +115,23 @@ impl Namespace {
             }
         }
         plan
+    }
+
+    pub fn ensure_procfs(&mut self) {
+        if self
+            .mounts
+            .iter()
+            .any(|entry| entry.target == PROCFS_TARGET)
+        {
+            return;
+        }
+        self.add_mount_entry(
+            PROCFS_TARGET,
+            Mount::P9 {
+                addr: PROCFS_ADDR.to_string(),
+                path: "".to_string(),
+            },
+        );
     }
 
     pub fn save_to_file<P: AsRef<Path>>(&self, file_path: P) -> io::Result<()> {
