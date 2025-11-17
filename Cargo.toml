@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "kernel/planten_kernel",
-    "libs/planten_9p", "libs/planten_fs_core", "libs/planten_fs_ramfs", "libs/planten_fs_proc", "libs/planten_fs_net", "libs/planten_ns", "userspace/planten_coreutils",
+    "libs/planten_9p", "libs/planten_fs_core", "libs/planten_fs_ramfs", "libs/planten_fs_proc", "libs/planten_fs_net", "libs/planten_fs_dev", "libs/planten_ns", "userspace/planten_coreutils",
     "tools/capture_golden", "tools/capture_procfs", "tools/plan9_qemu_client", "tests/proc_client",
 ]
 

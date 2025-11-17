@@ -32,7 +32,9 @@ stat, twstat, remove, clone, flush, and error handling. `tools/capture_golden` d
 server programmatically and stores golden frames under `tests/golden_traces`. `planten_fs_net` mirrors
 the host networking stack by serving `/net/interfaces`, `/net/tcp`, and `/net/udp`, sourcing data
 from `/sys/class/net` and `/proc/net` so `/net` becomes another FsServer-backed tree alongside
-RAMFS and ProcFS.
+RAMFS and ProcFS. `planten_fs_dev` exposes `/dev/null`, `/dev/zero`, `/dev/random`, and `/dev/console`
+so namespaces can interact with those classic devices via 9P, and `docs/pseudofs-workflow.md` details
+how to capture and replay traces for these pseudo-filesystems.
 
 ## Userspace and tooling
 
